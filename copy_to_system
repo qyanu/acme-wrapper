@@ -1,0 +1,48 @@
+#!/bin/bash
+set -u
+
+mydir="$(dirname "$0")"
+keysdir="${mydir}/private"
+certsdir="${mydir}/public"
+cadir="${mydir}/authority"
+
+hostname="${1:-}"
+
+[[ -n "$hostname" ]] || {
+    echo "please specify hostname as first argument"
+    exit 1
+}
+
+
+keyname="letsencrypt_${hostname}"
+keyfile=""
+if [[ -f "${keysdir}/${keyname}" ]]; then
+    keyfile="${keysdir}/${keyname}"
+else
+    keyfile="$(ls "${keysdir}/"*"${keyname}_key.pem" | sort --reverse | head -n1)"
+fi
+[[ -f "${keyfile}" ]] && {
+    cp -pdP -v "${keyfile}" "/etc/ssl/private/"
+    ln -snf -v "$(basename "${keyfile}")" "/etc/ssl/private/${keyname}_key.pem"
+}
+
+
+certname="letsencrypt_${hostname}"
+certfile=""
+if [[ -f "${certsdir}/${certname}" ]]; then
+    certfile="${certsdir}/${certname}"
+else
+    certfile="$(ls "${certsdir}/"*"${certname}_crt.pem" | sort --reverse | head -n1)"
+fi
+[[ -f "${certfile}" ]] || {
+    echo "cannot find file for certname: $certname"
+    exit 1
+}
+cp -pdP -v "${certfile}" "/etc/ssl/certs/"
+ln -snf -v "$(basename "${certfile}")" "/etc/ssl/certs/${certname}_crt.pem"
+
+# also store bundle
+cat "/etc/ssl/certs/${certname}_crt.pem" "${cadir}/intermediate.pem" \
+    "${cadir}/root.pem" > "/etc/ssl/certs/${certname}_crt+bundle.pem"
+
+c_rehash > /dev/null 2>&1

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+[[ -n "$1" ]] || {
+    echo "hostname as first parameter"
+    exit 0
+}
+
+hostname="$1"
+name="$(date +%Y-%m-%d)_letsencrypt_$1"
+
+openssl req -new -sha256 -out "public/${name}_csr.pem" -key "public/${name}_key.pem" -multivalue-rdn -subj "/CN=${hostname}"
+
