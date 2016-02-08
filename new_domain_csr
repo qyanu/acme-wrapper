@@ -8,5 +8,5 @@
 hostname="$1"
 name="$(date +%Y-%m-%d)_letsencrypt_$1"
 
-openssl req -new -sha256 -out "public/${name}_csr.pem" -key "public/${name}_key.pem" -multivalue-rdn -subj "/CN=${hostname}"
+openssl req -new -sha256 -out "public/${name}_csr.pem" -key "private/${name}_key.pem" -multivalue-rdn -subj "/CN=${hostname}"
 

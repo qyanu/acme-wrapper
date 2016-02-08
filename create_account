@@ -1,0 +1,8 @@
+#!/bin/bash
+
+mydir="$(dirname "$0")"
+
+keyfile="${mydir}/$(date +%Y-%m-%d)_letsencrypt-account_key.pem"
+openssl genrsa 4096 > "${keyfile}"
+chmod go-rwx "${keyfile}"
+ln -snf "${keyfile}" "${mydir}/account.key"

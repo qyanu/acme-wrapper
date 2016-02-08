@@ -9,7 +9,4 @@ hostname="$1"
 basedomain="$(sed -re 's/(.*\.)?([^.]+\.[^.]+)/\2/' <<<"${hostname}")"
 name="$(date +%Y-%m-%d)_letsencrypt_$1"
 
-python letsencrypt-nosudo/sign_csr.py -p user.pub -k user.key --autosign \
-    --file-dir /var/www/html -e hostmaster@${basedomain} \
-    -f "public/${name}_csr.pem" > "public/${name}_crt.pem"
-
+python acme-tiny/acme_tiny.py --account-key ./account.key --csr "public/${name}_csr.pem" --acme-dir /var/www/acme-challenge/ > "public/${name}_crt.pem"

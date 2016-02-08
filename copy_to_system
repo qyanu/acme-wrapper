@@ -22,7 +22,7 @@ else
     keyfile="$(ls "${keysdir}/"*"${keyname}_key.pem" | sort --reverse | head -n1)"
 fi
 [[ -f "${keyfile}" ]] && {
-    cp -pdP -v "${keyfile}" "/etc/ssl/private/"
+    cp --remove-destination -v "${keyfile}" "/etc/ssl/private/"
     ln -snf -v "$(basename "${keyfile}")" "/etc/ssl/private/${keyname}_key.pem"
 }
 
@@ -38,11 +38,34 @@ fi
     echo "cannot find file for certname: $certname"
     exit 1
 }
-cp -pdP -v "${certfile}" "/etc/ssl/certs/"
-ln -snf -v "$(basename "${certfile}")" "/etc/ssl/certs/${certname}_crt.pem"
+certfilename="$(basename "${certfile}")"
+certbasename="${certfilename%_crt.pem}"
+
+cp --remove-destination -v "${certfile}" "/etc/ssl/certs/"
+chmod a+r "/etc/ssl/certs/${certfilename}"
+ln -snf -v "${certfilename}" "/etc/ssl/certs/${certname}_crt.pem"
+
 
 # also store bundle
+echo "cat ... > '/etc/ssl/certs/${certbasename}_crt+bundle.pem'"
 cat "/etc/ssl/certs/${certname}_crt.pem" "${cadir}/intermediate.pem" \
-    "${cadir}/root.pem" > "/etc/ssl/certs/${certname}_crt+bundle.pem"
+    "${cadir}/root.pem" > "/etc/ssl/certs/${certbasename}_crt+bundle.pem"
+chmod a+r,go-w "/etc/ssl/certs/${certbasename}_crt+bundle.pem"
+ln -snf -v "${certbasename}_crt+bundle.pem" \
+           "/etc/ssl/certs/${certname}_crt+bundle.pem"
 
 c_rehash > /dev/null 2>&1
+
+# also store key+crt+bundle if key exists
+[[ -f "$keyfile" ]] && {
+    echo "cat ... > '/etc/ssl/private/${certbasename}_key+crt+bundle.pem'"
+    cat "${keyfile}"\
+        "${certfile}" \
+        "${cadir}/intermediate.pem" \
+        "${cadir}/root.pem" \
+        > "/etc/ssl/private/${certbasename}_key+crt+bundle.pem"
+    chmod go-rwx "/etc/ssl/private/${certbasename}_key+crt+bundle.pem"
+    ln -snf -v "${certbasename}_key+crt+bundle.pem" \
+               "/etc/ssl/private/${certname}_key+crt+bundle.pem"
+}
+
