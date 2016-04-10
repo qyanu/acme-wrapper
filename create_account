@@ -1,8 +1,58 @@
 #!/bin/bash
 
-mydir="$(dirname "$0")"
+##-- section that should go to config file
+RSA_KEY_BITS=4096
+##-- end of config section
 
-keyfile="${mydir}/$(date +%Y-%m-%d)_letsencrypt-account_key.pem"
-openssl genrsa 4096 > "${keyfile}"
+mydir="$(dirname "$0")"
+keysdir="${mydir}/private"
+certsdir="${mydir}/public"
+cadir="${mydir}/authority"
+etcdir="${mydir}/etc"
+opensslconfig="${etcdir}/openssl.cnf"
+
+# see sysexits.h
+EX_OK=0
+EX_USAGE=64
+EX_NOINPUT=66
+
+
+echoerr() {
+    echo "[$$]" "$@" >&2
+}
+
+echolog() {
+    echo "[$$]" "$@"
+}
+
+printhelp() {
+    echoerr "$0 [OPTIONS]"
+    echoerr ""
+    echoerr "generate a new letsencrypt account rsa key-pair"
+    echoerr ""
+    echoerr "OPTIONS:"
+    echoerr "  --help display this help and exit"
+    echoerr "  "
+}
+
+parse_cmdline() {
+    # no command line options beside --help
+    [[ "$#" -ne 0 ]] && {
+        printhelp
+        exit $EX_USAGE
+    }
+}
+
+parse_cmdline "$@"
+
+
+datestr="$(date +%Y-%m-%d)"
+keyfile="${mydir}/${datestr}_letsencrypt-account_key.pem"
+pubfile="${mydir}/${datestr}_letsencrypt-account_pub.pem"
+
+openssl genrsa "$RSA_KEY_BITS" > "${keyfile}"
 chmod go-rwx "${keyfile}"
 ln -snf "${keyfile}" "${mydir}/account.key"
+
+openssl rsa -in "${keyfile}" -pubout > "${pubfile}"
+ln -snf "${pubfile}" "${mydir}/account.pub"

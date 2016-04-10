@@ -1,0 +1,187 @@
+#!/bin/bash
+
+##-- section that should go to config file
+ACME_CHALLENGE_DIR="/var/www/acme-challenge"
+CA_PATH=/etc/ssl/certs
+##-- end of config section
+
+
+mydir="$(dirname "$0")"
+keysdir="${mydir}/private"
+certsdir="${mydir}/public"
+cadir="${mydir}/authority"
+etcdir="${mydir}/etc"
+opensslconfig="${etcdir}/openssl.cnf"
+
+# see sysexits.h
+EX_OK=0
+EX_USAGE=64
+EX_NOINPUT=66
+EX_UNAVAILABLE=69
+
+echoerr() {
+    echo "[$$]" "$@" >&2
+}
+
+echolog() {
+    echo "[$$]" "$@"
+}
+
+printhelp() {
+    echoerr "$0 [OPTIONS] [FQDN [FQDN [...]]]"
+    echoerr ""
+    echoerr "submit a certificate signing request to letsencrypt"
+    echoerr "place the challenges into the ACME_CHALLENGE_DIR"
+    echoerr "and after successful challenge, retrieve the certificate"
+    echoerr "and store into several files (plain crt, crt+bundle)"
+    echoerr ""
+    echoerr "Daniel Roesler's acme-tiny <https://github.com/diafygi/acme-tiny>"
+    echoerr "is used as letsencrypt client and other functions as much as "
+    echoerr "possible"
+    echoerr ""
+    echoerr "OPTIONS:"
+    echoerr "  --help display this help and exit"
+    echoerr "  --all submit the csr for all domains listed in etc/domains.list"
+    echoerr "        FQDNs must not be listed together with this option"
+    echoerr "  "
+}
+
+parse_cmdline() {
+    [[ "$#" -eq 0 ]] && {
+        printhelp
+        exit $EX_USAGE
+    }
+
+    while [[ $# > 0 ]]
+    do
+        key="$1"
+
+        case "$key" in
+            --all)
+                OPT_ALL=1
+                ;;
+            --help)
+                printhelp
+                exit $EX_USAGE
+                ;;
+            *)
+                FQDNS+=("$key")
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$OPT_ALL" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
+        echoerr "ERROR: options --all and specifying FQDNs are mutually exclusive"
+        exit $EX_USAGE
+    }
+
+    [[ "$OPT_ALL" -eq 0 && "${#FQDNS[@]}" -lt 1 ]] && {
+        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+        exit $EX_USAGE
+    }
+
+    [[ -d "${ACME_CHALLENGE_DIR}" && -w "${ACME_CHALLENGE_DIR}" ]] || {
+        echoerr "ERROR: cannot write into directory: '${ACME_CHALLENGE_DIR}'"
+        exit $EX_NOINPUT
+    }
+}
+
+
+# process global array FQDNS
+process_fqdns() {
+    # ignore empty array
+    [[ "${#FQDNS}" -gt 0 ]] || {
+        return
+    }
+
+    fqdn_cn="${FQDNS[0]}"
+    filename="$(date +%Y-%m-%d)_letsencrypt_${fqdn_cn}"
+
+    tmpfile="$(mktemp)"
+    python "${mydir}/acme-tiny/acme_tiny.py" \
+        --account-key "${mydir}/account.key" \
+        --csr "${certsdir}/${filename}_csr.pem" \
+        --acme-dir "$ACME_CHALLENGE_DIR" \
+    | openssl x509 -text \
+    > "${tmpfile}"
+
+    if [[ "$?" -eq 0 ]]; then
+        mv "${tmpfile}" "${certsdir}/${filename}_crt.pem"
+    else
+        rm "$tmpfile"
+        echoerr "ERROR: could not get signed certificate from letsencrypt"
+        exit $EX_UNAVAILABLE
+    fi
+
+    issuer_uri="$(
+        openssl x509 -in "${certsdir}/${filename}_crt.pem" -noout -text \
+            | sed -n -re '/ +CA Issuers - URI:/s/[^:]*://p'
+    )"
+
+    issuer_filename="$(echo "$issuer_uri" | sed -re 's/\//_/g')"
+
+    tmpfile=$(mktemp)
+    curl -s "${issuer_uri}" > "${tmpfile}"
+    if [[ "$?" -eq 0 ]]; then
+        mv "${tmpfile}" "${cadir}/${issuer_filename}.der"
+    else
+        rm "$tmpfile"
+        echoerr "ERROR: could not download issuer certificate"
+        echoerr "(the certificate itself was probably downloaded OK)"
+        exit $EX_UNAVAILABLE
+    fi
+
+    openssl x509 \
+        -inform DER -in "${cadir}/${issuer_filename}.der" \
+        -text > "${cadir}/${issuer_filename}.pem"
+
+    # create bundle file of domain certificate
+    cat "${certsdir}/${filename}_crt.pem" \
+        "${cadir}/${issuer_filename}.pem" \
+        > "${certsdir}/${filename}_crt+bundle.pem"
+
+    # verify the certificate
+    openssl verify -CApath "${CA_PATH}" \
+        "${certsdir}/${filename}_crt.pem"
+    [[ "$?" -eq 0 ]] || {
+        echoerr "ERROR: the issued certificate '${certsdir}/${filename}_crt.pem'"
+        echoerr "was not accepted as valid by this system"
+        exit $EX_UNAVAILABLE
+    }
+
+    openssl verify -CApath "${CA_PATH}" \
+        "${certsdir}/${filename}_crt+bundle.pem"
+    [[ "$?" -eq 0 ]] || {
+        echoerr "ERROR: the issued certificate '${certsdir}/${filename}_crt+bundle.pem'"
+        echoerr "was not accepted as valid by this system"
+        exit $EX_UNAVAILABLE
+    }
+
+} # end of procedure "process_fqdns"
+
+
+OPT_ALL=0
+FQDNS=()
+
+parse_cmdline "$@"
+
+if [[ "$OPT_ALL" -eq 1 ]];
+then
+    [[ -r "${etcdir}/domains.list" ]] || {
+        echoerr "ERROR: cannot read ${etcdir}/domains.list"
+        exit $EX_NOINPUT
+    }
+
+    while read line; do
+        # Note: domains.list allows only domainnames without spaces, thus
+        # don't use quotes around $line here
+        FQDNS=($line)
+        process_fqdns
+    done <"${etcdir}/domains.list"
+else
+    # Note: FQDNS already set by process_cmdline
+    process_fqdns
+fi
+
+exit $EX_OK

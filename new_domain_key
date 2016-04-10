@@ -1,12 +1,117 @@
 #!/bin/bash
+set -u
 
-[[ -n "$1" ]] || {
-    echo "hostname as first parameter"
-    exit 0
+##-- section that should go to config file
+RSA_KEY_BITS=4096
+##-- end of config section
+
+
+mydir="$(dirname "$0")"
+keysdir="${mydir}/private"
+certsdir="${mydir}/public"
+cadir="${mydir}/authority"
+etcdir="${mydir}/etc"
+opensslconfig="${etcdir}/openssl.cnf"
+
+# see sysexits.h
+EX_OK=0
+EX_USAGE=64
+EX_NOINPUT=66
+
+echoerr() {
+    echo "[$$]" "$@" >&2
 }
 
-name="$(date +%Y-%m-%d)_letsencrypt_$1"
+echolog() {
+    echo "[$$]" "$@"
+}
 
-openssl genrsa -out "private/${name}_key.pem" 4096
-chmod go-rwx "private/${name}_key.pem"
+printhelp() {
+    echoerr "$0 [OPTIONS] [FQDN [FQDN [...]]]"
+    echoerr ""
+    echoerr "generate a new rsa key pair for use with a later generated "
+    echoerr "certificate request."
+    echoerr ""
+    echoerr "OPTIONS:"
+    echoerr "  --help display this help and exit"
+    echoerr "  --all generate a key for all domains listed in etc/domains.list"
+    echoerr "        FQDNs must not be listed together with this option"
+    echoerr "  "
+}
 
+parse_cmdline() {
+    [[ "$#" -eq 0 ]] && {
+        printhelp
+        exit $EX_USAGE
+    }
+
+    while [[ $# > 0 ]]
+    do
+        key="$1"
+
+        case "$key" in
+            --all)
+                OPT_ALL=1
+                ;;
+            --help)
+                printhelp
+                exit $EX_USAGE
+                ;;
+            *)
+                FQDNS+=("$key")
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$OPT_ALL" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
+        echoerr "ERROR: options --all and specifying FQDNs are mutually exclusive"
+        exit $EX_USAGE
+    }
+
+    [[ "$OPT_ALL" -eq 0 && "${#FQDNS[@]}" -lt 1 ]] && {
+        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+        exit $EX_USAGE
+    }
+}
+
+# process global array FQDNS
+process_fqdns() {
+    # ignore empty array
+    [[ "${#FQDNS}" -gt 0 ]] || {
+        return
+    }
+
+    # ignore all but the first fqdn
+    fqdn_cn="${FQDNS[0]}"
+    filename="$(date +%Y-%m-%d)_letsencrypt_${fqdn_cn}"
+
+    openssl genrsa -out "${keysdir}/${filename}_key.pem" "$RSA_KEY_BITS"
+    chmod go-rwx "${keysdir}/${filename}_key.pem"
+} # end of procedure "process_fqdns"
+
+
+OPT_ALL=0
+FQDNS=()
+
+parse_cmdline "$@"
+
+if [[ "$OPT_ALL" -eq 1 ]];
+then
+    [[ -r "${etcdir}/domains.list" ]] || {
+        echoerr "ERROR: cannot read ${etcdir}/domains.list"
+        exit $EX_NOINPUT
+    }
+
+    while read line; do
+        # Note: domains.list allows only domainnames without spaces, thus
+        # don't use quotes around $line here
+        FQDNS=($line)
+        process_fqdns
+    done <"${etcdir}/domains.list"
+else
+    # Note: FQDNS already set by process_cmdline
+    process_fqdns
+fi
+
+exit $EX_OK

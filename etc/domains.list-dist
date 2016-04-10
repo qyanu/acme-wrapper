@@ -1,0 +1,8 @@
+# lists all domains that should generate certificates
+#
+# one line per certificate
+# each line is a space-seperated list of fully qualified domain names
+# for each line, at least one domain name must be specified.
+#
+# lines starting with '#' are ignored.
+# empty lines are ignored.

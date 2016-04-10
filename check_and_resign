@@ -1,0 +1,103 @@
+#!/bin/bash
+set -u
+
+#######
+## checks the given fqdn(s) and re-requests a signed certificate if old
+##
+
+#
+# intended to be called via cron
+# (makes only error output, is expected to be started more often than needed)
+#
+
+mydir="$(dirname "$0")"
+keysdir="${mydir}/private"
+certsdir="${mydir}/public"
+cadir="${mydir}/authority"
+etcdir="${mydir}/etc"
+
+# see sysexits.h
+EX_SUCCESS=0
+EX_USAGE=64
+EX_NOINPUT=66
+
+# TODO: move to config
+# re-request 3 days before expiry
+# value is in seconds
+expiryguard=$((3*24*60*60))
+
+echoerr() {
+    echo "[$$]" "$@" >&2
+}
+
+echolog() {
+    echo "[$$]" "$@"
+}
+
+printhelp() {
+    echoerr "$0 [ --all | <fqdn> ]"
+    echoerr ""
+    echoerr "re-requests certificates for the specified domains"
+    echoerr
+}
+
+fqdn="${1:-}"
+[[ -n "$fqdn" ]] || {
+    echoerr "ERROR: no domainname or --all given"
+    printhelp
+    exit $EX_USAGE
+}
+
+# comment in domains.list file
+# silent noop success
+[[ "$fqdn" = "#" ]] && {
+    exit $EX_SUCCESS
+}
+
+[[ "$fqdn" = "--all" ]] && {
+    xargs -l1 "$0" < "${mydir}/etc/domains.list"
+    echoerr "ALL OK"
+    exit $EX_SUCCESS
+}
+
+echolog "${fqdn}"
+
+certname="letsencrypt_${fqdn}"
+certfile=""
+if [[ -f "${certsdir}/${certname}" ]]; then
+    certfile="${certsdir}/${certname}"
+else
+    certfile="$(compgen -G "${certsdir}/*${certname}_crt.pem" | sort --reverse | head -n1)"
+fi
+
+# if certfile doesn't exists generate
+[[ -f "${certfile}" ]] || {
+    "${mydir}/new_domain_csr" "$fqdn"
+    "${mydir}/sign_domain_csr" "$fqdn"
+}
+
+# if certfile still doesn't exists, fatal error
+[[ -f "${certfile}" ]] || {
+    echoerr "ERROR: cannot find or generate certificate: $certname"
+    exit $EX_NOINPUT
+}
+
+certfilename="$(basename "${certfile}")"
+certbasename="${certfilename%_crt.pem}"
+
+echolog "CERT ${certfilename}"
+
+openssl x509 -checkend "$expiryguard" -in "${certfile}"
+[[ "$?" -eq 0 ]] || {
+    # need re-request
+    echoerr "RENEW"
+    "${mydir}/new_domain_csr" "$fqdn"
+    "${mydir}/sign_domain_csr" "$fqdn"
+}
+
+echoerr "OK"
+exit $EX_SUCCESS
+
+#domains="$(< "${mydir}/etc/domains.list")"
+#domains=
+
