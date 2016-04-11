@@ -32,18 +32,17 @@ printhelp() {
     echoerr ""
     echoerr "submit a certificate signing request to letsencrypt"
     echoerr "place the challenges into the ACME_CHALLENGE_DIR"
-    echoerr "and after successful challenge, retrieve the certificate"
-    echoerr "and store into several files (plain crt, crt+bundle)"
+    echoerr "and after successful challenge, retrieve the certificate."
     echoerr ""
     echoerr "Daniel Roesler's acme-tiny <https://github.com/diafygi/acme-tiny>"
-    echoerr "is used as letsencrypt client and other functions as much as "
+    echoerr "is used as letsencrypt client and for other functions as much as "
     echoerr "possible"
     echoerr ""
     echoerr "OPTIONS:"
     echoerr "  --help display this help and exit"
     echoerr "  --all submit the csr for all domains listed in etc/domains.list"
     echoerr "        FQDNs must not be listed together with this option"
-    echoerr "  "
+    echoerr ""
 }
 
 parse_cmdline() {
@@ -113,51 +112,6 @@ process_fqdns() {
         echoerr "ERROR: could not get signed certificate from letsencrypt"
         exit $EX_UNAVAILABLE
     fi
-
-    issuer_uri="$(
-        openssl x509 -in "${certsdir}/${filename}_crt.pem" -noout -text \
-            | sed -n -re '/ +CA Issuers - URI:/s/[^:]*://p'
-    )"
-
-    issuer_filename="$(echo "$issuer_uri" | sed -re 's/\//_/g')"
-
-    tmpfile=$(mktemp)
-    curl -s "${issuer_uri}" > "${tmpfile}"
-    if [[ "$?" -eq 0 ]]; then
-        mv "${tmpfile}" "${cadir}/${issuer_filename}.der"
-    else
-        rm "$tmpfile"
-        echoerr "ERROR: could not download issuer certificate"
-        echoerr "(the certificate itself was probably downloaded OK)"
-        exit $EX_UNAVAILABLE
-    fi
-
-    openssl x509 \
-        -inform DER -in "${cadir}/${issuer_filename}.der" \
-        -text > "${cadir}/${issuer_filename}.pem"
-
-    # create bundle file of domain certificate
-    cat "${certsdir}/${filename}_crt.pem" \
-        "${cadir}/${issuer_filename}.pem" \
-        > "${certsdir}/${filename}_crt+bundle.pem"
-
-    # verify the certificate
-    openssl verify -CApath "${CA_PATH}" \
-        "${certsdir}/${filename}_crt.pem"
-    [[ "$?" -eq 0 ]] || {
-        echoerr "ERROR: the issued certificate '${certsdir}/${filename}_crt.pem'"
-        echoerr "was not accepted as valid by this system"
-        exit $EX_UNAVAILABLE
-    }
-
-    openssl verify -CApath "${CA_PATH}" \
-        "${certsdir}/${filename}_crt+bundle.pem"
-    [[ "$?" -eq 0 ]] || {
-        echoerr "ERROR: the issued certificate '${certsdir}/${filename}_crt+bundle.pem'"
-        echoerr "was not accepted as valid by this system"
-        exit $EX_UNAVAILABLE
-    }
-
 } # end of procedure "process_fqdns"
 
 

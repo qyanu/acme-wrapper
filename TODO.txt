@@ -1,0 +1,7 @@
+ - download the whole chain of certificates (usin 'CA Issuers - URI')
+ - make everything using transactional behaviour: don't corrupt the file-database
+ - use FHS directory
+
+debianize:
+ - make package and stuff
+

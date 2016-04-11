@@ -86,7 +86,8 @@ process_fqdns() {
     fqdn_cn="${FQDNS[0]}"
     filename="$(date +%Y-%m-%d)_letsencrypt_${fqdn_cn}"
 
-    openssl genrsa -out "${keysdir}/${filename}_key.pem" "$RSA_KEY_BITS"
+    openssl genrsa -out "${keysdir}/${filename}_key.pem" "$RSA_KEY_BITS" \
+        > /dev/null 2>/dev/null
     chmod go-rwx "${keysdir}/${filename}_key.pem"
 } # end of procedure "process_fqdns"
 

@@ -1,30 +1,27 @@
 #!/bin/bash
 set -u
 
-#######
-## checks the given fqdn(s) and re-requests a signed certificate if old
-##
+##-- section that should go to config file
 
-#
-# intended to be called via cron
-# (makes only error output, is expected to be started more often than needed)
-#
+# re-request 3 days before expiry
+# value is in seconds
+RESUBMIT_BEFORE=$((3*24*60*60))
+
+##-- end of config section
+
 
 mydir="$(dirname "$0")"
 keysdir="${mydir}/private"
 certsdir="${mydir}/public"
 cadir="${mydir}/authority"
 etcdir="${mydir}/etc"
+opensslconfig="${etcdir}/openssl.cnf"
 
 # see sysexits.h
-EX_SUCCESS=0
+EX_OK=0
 EX_USAGE=64
 EX_NOINPUT=66
-
-# TODO: move to config
-# re-request 3 days before expiry
-# value is in seconds
-expiryguard=$((3*24*60*60))
+EX_UNAVAILABLE=69
 
 echoerr() {
     echo "[$$]" "$@" >&2
@@ -34,70 +31,181 @@ echolog() {
     echo "[$$]" "$@"
 }
 
+
 printhelp() {
-    echoerr "$0 [ --all | <fqdn> ]"
+    echoerr "$0 [OPTIONS] [FQDN [FQDN [...]]]"
     echoerr ""
-    echoerr "re-requests certificates for the specified domains"
-    echoerr
+    echoerr "do everything in turn:"
+    echoerr "  - create account key if missing"
+    echoerr "  - create domain key if missing"
+    echoerr "  - create domain csr if missing"
+    echoerr "  - submit csr to letsencrypt if crt missing or will expire within"
+    echoerr "    the next RESUBMIT_BEFORE seconds"
+    echoerr "  - create crt+bundle file for certificates"
+    echoerr ""
+    echoerr "OPTIONS:"
+    echoerr "  --help display this help and exit"
+    echoerr "  --all process all all domains listed in etc/domains.list"
+    echoerr "        FQDNs must not be listed together with this option"
+    echoerr ""
 }
 
-fqdn="${1:-}"
-[[ -n "$fqdn" ]] || {
-    echoerr "ERROR: no domainname or --all given"
-    printhelp
-    exit $EX_USAGE
+parse_cmdline() {
+    [[ "$#" -eq 0 ]] && {
+        printhelp
+        exit $EX_USAGE
+    }
+
+    while [[ $# > 0 ]]
+    do
+        key="$1"
+
+        case "$key" in
+            --all)
+                OPT_ALL=1
+                ;;
+            --help)
+                printhelp
+                exit $EX_USAGE
+                ;;
+            *)
+                FQDNS+=("$key")
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$OPT_ALL" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
+        echoerr "ERROR: options --all and specifying FQDNs are mutually exclusive"
+        exit $EX_USAGE
+    }
+
+    [[ "$OPT_ALL" -eq 0 && "${#FQDNS[@]}" -lt 1 ]] && {
+        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+        exit $EX_USAGE
+    }
 }
 
-# comment in domains.list file
-# silent noop success
-[[ "$fqdn" = "#" ]] && {
-    exit $EX_SUCCESS
-}
 
-[[ "$fqdn" = "--all" ]] && {
-    xargs -l1 "$0" < "${mydir}/etc/domains.list"
-    echoerr "ALL OK"
-    exit $EX_SUCCESS
-}
 
-echolog "${fqdn}"
+# process global array FQDNS
+process_fqdns() {
+    # ignore empty array
+    [[ "${#FQDNS}" -gt 0 ]] || {
+        return
+    }
 
-certname="letsencrypt_${fqdn}"
-certfile=""
-if [[ -f "${certsdir}/${certname}" ]]; then
-    certfile="${certsdir}/${certname}"
+    # create account key if missing
+    [[ -e "${mydir}/account.key" ]] || {
+        "${mydir}/create_account"
+    }
+
+    fqdn_cn="${FQDNS[0]}"
+    certname="letsencrypt_${fqdn_cn}"
+
+    echolog "CHECK ${FQDNS[@]}"
+
+    have_new_key=0
+    
+    # find or create domain key
+    keyfilepath="$(compgen -G "${keysdir}/*${certname}_key.pem" \
+        | sort --reverse | head -n1)"
+    [[ -e "${keyfilepath}" ]] || {
+        have_new_key=1
+        echolog "  ${certname}: newkey"
+        "${mydir}/new_domain_key" "${FQDNS[@]}"
+        [[ $? -eq 0 ]] || {
+            echoerr "ERROR: aborting after unsuccessfully creating domain key"
+            exit $EX_UNAVAILABLE
+        }
+        keyfilepath="$(compgen -G "${keysdir}/*${certname}_key.pem" \
+            | sort --reverse | head -n1)"
+    }
+
+    # find or create domain crt
+    crtfilepath="$(compgen -G "${certsdir}/*${certname}_crt.pem" \
+        | sort --reverse | head -n1)"
+    [[ -e "${crtfilepath}" ]] || {
+        # new key if new certificate and key not yet generated
+        [[ "$have_new_key" -eq 1 ]] || {
+            echolog "  ${certname}: newkey"
+            "${mydir}/new_domain_key" "${FQDNS[@]}"
+            have_new_key=1
+            keyfilepath="$(compgen -G "${keysdir}/*${certname}_key.pem" \
+                | sort --reverse | head -n1)"
+        }
+
+        echolog "  ${certname}: newcsr"
+        "${mydir}/new_domain_csr" "${FQDNS[@]}"
+        echolog "  ${certname}: submit"
+        "${mydir}/submit_domain_csr" "${FQDNS[@]}"
+        [[ $? -eq 0 ]] || {
+            echoerr "ERROR: aborting after unsuccessfully creating domain crt"
+            exit $EX_UNAVAILABLE
+        }
+        crtfilepath="$(compgen -G "${keysdir}/*${certname}_crt.pem" \
+            | sort --reverse | head -n1)"
+    }
+
+    # check if files can be read
+    [[ -r "${keyfilepath}" ]] || {
+        echoerr "ERROR: cannot read key file: ${keyfilepath}"
+        exit $EX_NOINPUT
+    }
+    [[ -r "${crtfilepath}" ]] || {
+        echoerr "ERROR: cannot read crt file: ${crtfilepath}"
+        exit $EX_NOINPUT
+    }
+
+    echolog "  ${certname}: check expiry"
+    openssl x509 -checkend "$RESUBMIT_BEFORE" -in "${crtfilepath}"
+    [[ "$?" -eq 0 ]] || {
+        # need new certificate
+        [[ $have_new_key -eq 1 ]] || {
+            echolog "  ${certname}: newkey"
+            "${mydir}/new_domain_key" "${FQDNS[@]}"
+            have_new_key=1
+            keyfilepath="$(compgen -G "${keysdir}/*${certname}_key.pem" \
+                | sort --reverse | head -n1)"
+        }
+        echolog "  ${certname}: newcsr"
+        "${mydir}/new_domain_csr" "${FQDNS[@]}"
+        echolog "  ${certname}: submit"
+        "${mydir}/submit_domain_csr" "${FQDNS[@]}"
+        [[ $? -eq 0 ]] || {
+            echoerr "ERROR: aborting after unsuccessfully recreating domain crt"
+            exit $EX_UNAVAILABLE
+        }
+        crtfilepath="$(compgen -G "${keysdir}/*${certname}_crt.pem" \
+            | sort --reverse | head -n1)"
+    }
+
+    echolog "  ${certname}: makechain"
+    "${mydir}/retrieve_domain_chain" "${FQDNS[@]}"
+} # end of procedure "process_fqdns"
+
+
+OPT_ALL=0
+FQDNS=()
+
+parse_cmdline "$@"
+
+if [[ "$OPT_ALL" -eq 1 ]];
+then
+    [[ -r "${etcdir}/domains.list" ]] || {
+        echoerr "ERROR: cannot read ${etcdir}/domains.list"
+        exit $EX_NOINPUT
+    }
+
+    while read line; do
+        # Note: domains.list allows only domainnames without spaces, thus
+        # don't use quotes around $line here
+        FQDNS=($line)
+        process_fqdns
+    done <"${etcdir}/domains.list"
 else
-    certfile="$(compgen -G "${certsdir}/*${certname}_crt.pem" | sort --reverse | head -n1)"
+    # Note: FQDNS already set by process_cmdline
+    process_fqdns
 fi
 
-# if certfile doesn't exists generate
-[[ -f "${certfile}" ]] || {
-    "${mydir}/new_domain_csr" "$fqdn"
-    "${mydir}/sign_domain_csr" "$fqdn"
-}
-
-# if certfile still doesn't exists, fatal error
-[[ -f "${certfile}" ]] || {
-    echoerr "ERROR: cannot find or generate certificate: $certname"
-    exit $EX_NOINPUT
-}
-
-certfilename="$(basename "${certfile}")"
-certbasename="${certfilename%_crt.pem}"
-
-echolog "CERT ${certfilename}"
-
-openssl x509 -checkend "$expiryguard" -in "${certfile}"
-[[ "$?" -eq 0 ]] || {
-    # need re-request
-    echoerr "RENEW"
-    "${mydir}/new_domain_csr" "$fqdn"
-    "${mydir}/sign_domain_csr" "$fqdn"
-}
-
-echoerr "OK"
-exit $EX_SUCCESS
-
-#domains="$(< "${mydir}/etc/domains.list")"
-#domains=
-
+exit $EX_OK
