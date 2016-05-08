@@ -1,0 +1,9 @@
+RANDFILE = /dev/urandom
+
+[ req ]
+prompt = no
+distinguished_name = req_distinguished_name
+req_extensions          = v3_req
+
+[ v3_req ]
+basicConstraints        = CA:FALSE
