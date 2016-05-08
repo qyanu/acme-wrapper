@@ -287,9 +287,9 @@ domain_new_key() {
     fqdn_cn="${FQDNS[0]}"
     datestr="$(datestring)"
     filename="letsencrypt_${fqdn_cn}"
-    keyfile="${keysdir}/${filename}_key.pem"
+    keyfile="${keysdir}/${datestr}_${filename}_key.pem"
     linktarget="${datestr}_${filename}_key.pem"
-    linkfile="${keysdir}/${datestr}_${filename}_key.pem"
+    linkfile="${keysdir}/${filename}_key.pem"
 
     commit=1
 
@@ -331,7 +331,7 @@ domain_new_csr() {
     [[ -r "${keyfile}" ]] || {
         echoerr "ERROR: could not read ${keyfile}"
         echoerr "maybe call '$0 --domain-new-key ${fqdn_cn}' first?"
-        return $EX_NOINPUTq
+        return $EX_NOINPUT
     }
 
     commit=1
@@ -406,6 +406,8 @@ domain_submit_csr() {
     commit=1
 
     tmpcrt="$(mktemp)"
+    prevumask="$(umask)"
+    umask 022
     python "${acme_tiny}" \
         --account-key "${accountkeyfile}" \
         --csr "${csrfile}" \
@@ -415,16 +417,17 @@ domain_submit_csr() {
         echoerr "ERROR: could not get signed certificate from letsencrypt"
         commit=0;
     }
+    umask "$prevumask"
 
     # verify that certificate matches private key
     ## if produces more than 1 line, fingerprints mismatch and thus
     ## public key parts are different
-    [[ "$(
-        (openssl x509 -noout -modulus -in "${crtfil}" | openssl md5 ;\
+    [[ "${commit}" -eq 1 && "$(
+        (openssl x509 -noout -modulus -in "${tmpcrt}" | openssl md5 ;\
          openssl rsa -noout -modulus -in "${keyfile}" | openssl md5) \
          | uniq | wc -l)" -ne 1 ]] &&
     {
-        echoerr "ERROR: received certificate does not match keypair"
+        echoerr "ERROR: received certificate does not match private key"
         commit=0
     }
 
@@ -438,11 +441,13 @@ domain_submit_csr() {
         echoerr "WARN: could not remove temporary file: ${tmpcrt}"
     }
 
-    chmod g+r "${crtfile}"
-    [[ "$?" -ne 0 ]] && commit=0;
+    [[ -e "${crtfile}" ]] && {
+        chmod g+r "${crtfile}"
+        [[ "$?" -ne 0 ]] && commit=0;
+    }
 
     # only commit work if no error
-    if [[ "$?" -eq 0 ]]; then
+    if [[ "${commit}" -eq 1 ]]; then
         ln -snf "${linktarget}" "${linkfile}"
     else
         echoerr "ERROR: rollback work, previous state retained"
@@ -613,14 +618,14 @@ automatic_upkeep() {
     bundlefile="${certsdir}/${filename}_crt+bundle.pem"
 
     # remember old symlink targets for rollback
-    local keylinktarget="$(readlinke "${keyfile}")"
-    local csrlinktarget="$(readlinke "${csrfile}")"
-    local crtlinktarget="$(readlinke "${crtfile}")"
-    local bundlelinktarget="$(readlinke "${bundlefile}")"
+    local keylinktarget="$(readlink "${keyfile}")"
+    local csrlinktarget="$(readlink "${csrfile}")"
+    local crtlinktarget="$(readlink "${crtfile}")"
+    local bundlelinktarget="$(readlink "${bundlefile}")"
 
     # 1. create account key if missing
     FQDNS=()
-    [[ -f "${accountdir}/current/account.key" ]] || {
+    [[ -f "${accountdir}/current/account_key.pem" ]] || {
         # create new account key
         account_create
         [[ "$?" -ne 0 ]] && {
@@ -695,15 +700,19 @@ automatic_upkeep() {
         }
 
         # revert changes if something went wrong
-        [[ "${commit}" -eq 1 ]] || {
+        [[ "${commit}" -ne 1 ]] && {
             # revert symlink of key
+            [[ -n "${keylinktarget}" ]] &&
+                ln -snf "${keylinktarget}" "${keyfile}"
             # revert symlink of csr
+            [[ -n "${csrlinktarget}" ]] &&
+                ln -snf "${csrlinktarget}" "${csrfile}"
             # revert symlink of crt
+            [[ -n "${crtlinktarget}" ]] &&
+                ln -snf "${crtlinktarget}" "${crtfile}"
             # revert symlink of bundle
-            ln -snf "${keylinktarget}" "${keyfile}"
-            ln -snf "${csrlinktarget}" "${csrfile}"
-            ln -snf "${crtlinktarget}" "${crtfile}"
-            ln -snf "${bundlelinktarget}" "${bundlefile}"
+            [[ -n "${bundlelinktarget}" ]] &&
+                ln -snf "${bundlelinktarget}" "${bundlefile}"
             return $EX_UNAVAILABLE
         }
 
