@@ -109,6 +109,7 @@ printhelp() {
     echoerr "      and retrieve the certificates up the chain, as referenced"
     echoerr "      inside the certificate."
     echoerr "      will create a crt+bundle file beside the certificate."
+    echoerr "      will create a crt+bundle+key file besode the key."
     echoerr ""
     echoerr "  --automatic-upkeep  do everything to in order to get a generic"
     echoerr "      certificate; usually combined with the --all options and"
@@ -461,7 +462,7 @@ chain_retrieve() {
         return $EX_USAGE
     }
     [[ "${#FQDNS[@]}" -gt 1 ]] && {
-        echoerr "INFO: ignoring all SANs, only using ${FQDN[0]}"
+        echoerr "INFO: ignoring all SANs, only using ${FQDNS[0]}"
     }
 
     datestr="$(datestring)"
@@ -474,9 +475,12 @@ chain_retrieve() {
     crtfile="${certsdir}/${filename}_crt.pem"
     # files written
     bundlefile="${certsdir}/${datestr}_${filename}_crt+bundle.pem"
+    bundlekeyfile="${keysdir}/${datestr}_${filename}_crt+bundle+key.pem"
     # written only if transaction-commit
     linkfile="${certsdir}/${filename}_crt+bundle.pem"
     linktarget="${datestr}_${filename}_crt+bundle.pem"
+    linkkeyfile="${keysdir}/${filename}_crt+bundle+key.pem"
+    linkkeytarget="${datestr}_${filename}_crt+bundle+key.pem"
 
     [[ -f "${crtfile}" ]] || {
         echoerr "ERROR: no certificate file found for '${fqdn_cn}'"
@@ -591,8 +595,12 @@ chain_retrieve() {
     # no errors, so store crt+bundle in proper filename
     cat "${bundletmpfd}" > "${bundlefile}"
     chmod g+r "${bundlefile}"
+    cat "${bundlefile}" > "${bundlekeyfile}"
+    cat "${keyfile}" >> "${bundlekeyfile}"
+    chmod g+r "${bundlekeyfile}"
     # plus create symlink
     ln -snf "${linktarget}" "${linkfile}"
+    ln -snf "${linkkeytarget}" "${linkkeyfile}"
 
     return $EX_OK
 }
