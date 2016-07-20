@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# no public access for new files, just in case
+umask 077
+
+# unpack the package content into "/opt/acme-wrapper/", overwriting any
+# conflicting files
+
+# install dependencies
+apt-get install \
+    coreutils \
+    curl \
+    openssl \
+    sed \
+
+# create user if not exists
+id acme-wrapper > /dev/null 2>&1
+[[ "$?" -eq 0 ]] || {
+    adduser --system \
+        --home /opt/acme-wrapper \
+        --no-create-home \
+        --shell /bin/false \
+        --group \
+        --disabled-password \
+        --disabled-login \
+        --gecos "user for automatic ssl-certificate updater and database" \
+        acme-wrapper
+}
+
+
+# use default configuration if no config exists from before
+[[ -e /opt/acme-wrapper/etc/acme-wrapper.conf ]] || {
+    cp /opt/acme-wrapper/etc/acme-wrapper.conf-dist \
+       /opt/acme-wrapper/etc/acme-wrapper.conf
+}
+
+## optionally use cron
+#cp /opt/acme-wrapper/lib/crontab.example /etc/cron.d/acme-wrapper

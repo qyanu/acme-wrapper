@@ -1,3 +1,6 @@
+# optionally overwrite the default location for the domains.list file
+#DOMAINSLIST_FILEPATH=
+
 # re-request 3 days before expiry
 # value is in seconds
 RESUBMIT_BEFORE=$((3*24*60*60))

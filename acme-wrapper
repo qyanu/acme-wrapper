@@ -1,28 +1,62 @@
 #!/bin/bash
+
+## avoid evil aliases by clearing all of them
+## but call this shell builtin within quotes, in case the word "unalias" itself
+## was aliased.
+"unalias" -a
+
+## set PATH to a known value if an attacker could only gain very restricted
+## control over the user's account, and using some evil value for PATH would
+## call unwanted executeables
+export PATH="/usr/bin:/bin"
+
+## make use of undefined variables a fatal error
 set -u
 
-
-########################
-#### self-awareness ####
-
-mydir="$(dirname "$0")"
-acme_tiny="${mydir}/acme-tiny/acme_tiny.py"
-etcdir="${mydir}/etc"
-libdir="${mydir}/lib"
-keysdir="${mydir}/private"
-certsdir="${mydir}/public"
-cadir="${mydir}/authority"
-accountdir="${mydir}/account"
-opensslconfig="${libdir}/openssl.cnf"
+## create files with restrictive umask by default, because
+##   $ touch file
+##   $ chmod og-rwx file
+## would give the attacker an opportunity to open the file before access
+## is restricted.
+umask 077
 
 
-###########################
-#### get configuration ####
 
-[[ -r "${etcdir}/letsencrypt-wrapper.conf" ]] && {
-    . "${etcdir}/letsencrypt-wrapper.conf"
-}
 
+###############################################################################
+############################## TABLE OF CONTENTS ##############################
+###############################################################################
+##
+## - exit code declarations
+##    - bash codes
+##    - sysexits.h codes
+##    - additional exit codes
+## - initial checks and global variables
+##    - test for necessary executeables
+##    - globals holding directory names/paths
+##    - globals configureable by user
+## - utility procedures
+## - printhelp
+## - command procedures
+##    - parse_cmdline
+##    - fsck_everything
+##    - new_letsencrypt_account
+##    - item_new_key
+##    - item_new_csr
+##    - item_submit_csr_to_letsencrypt
+##    - item_chain_retrieve
+##    - item_active
+##    - item_fail
+##    - automatic_letsencrypt
+## - main
+##
+
+
+
+
+###############################################################################
+################################# EXIT CODES ##################################
+###############################################################################
 
 ################################
 #### codes reserved by bash ####
@@ -49,694 +83,1535 @@ EX_OK=0
 # gap from 1 to 63
 EX_BASE=64
 EX_USAGE=64
+EX_DATAERR=65
 EX_NOINPUT=66
+EX_NOUSER=67
+EX_NOHOST=68
 EX_UNAVAILABLE=69
+EX_SOFTWARE=70
+EX_OSERR=71
+EX_OSFILE=72
+EX_CANTCREAT=73
+EX_IOERR=74
+EX_TEMPFAIL=75
+EX_PROTOCOL=76
+EX_NOPERM=77
 EX_CONFIG=78
 # gap from 78 to 255
 
-###############################
+##############################
 #### my custom exit codes ####
 EX_OK=0
-# use range 16 to 32 for errors:
+EX_FAIL=1
+# use range 16 to 32 for custom errors:
+EX_NO=16
 
 
 
-echoerr() {
-    echo "[$$]" "$@" >&2
+
+###############################################################################
+##################### INITIAL CHECKS AND GLOBAL VARIABLES #####################
+###############################################################################
+
+
+###############################################
+#### test if neccessary executeables exist ####
+
+function checkfilex() {
+    [[ -e "$1" ]] || {
+        echo "COULD NOT START: file not found: $1"
+        exit "$EX_OSFILE"
+    }
+    [[ -x "$1" ]] || {
+        echo "COULD NOT START: file not executable: $1"
+        exit "$EX_OSFILE"
+    }
+    [[ -d "$1" ]] && {
+        echo "COULD NOT START: file is a directory: $1"
+        exit "$EX_OSFILE"
+    }
+    return $EX_OK
+}
+checkfilex /bin/cat
+checkfilex /bin/chmod
+checkfilex /bin/cp
+checkfilex /bin/date
+checkfilex /bin/mktemp
+checkfilex /bin/readlink
+checkfilex /bin/rm
+checkfilex /bin/rmdir
+checkfilex /bin/sed
+checkfilex /usr/bin/basename
+checkfilex /usr/bin/curl
+checkfilex /usr/bin/dirname
+checkfilex /usr/bin/openssl
+checkfilex /usr/bin/sha1sum
+checkfilex /usr/bin/uniq
+checkfilex /usr/bin/wc
+unset -f checkfilex
+
+
+
+###################################
+#### directory names and paths ####
+
+MYNAME="$0"
+mydir="$(dirname "$0")"
+acme_tiny="${mydir}/acme-tiny/acme_tiny.py"
+etcdir="${mydir}/etc"
+libdir="${mydir}/lib"
+spooldir="${mydir}/spool"
+databasedir="${mydir}/database"
+letsencryptaccountdir="${mydir}/letsencrypt-account"
+cadir="${mydir}/authority"
+opensslconfig="${libdir}/openssl.cnf"
+
+
+## general purpose temporary file on disk
+## automatically freed by OS upon exit
+TEMPFILEPATH="$(mktemp)"
+exec 3<>"${TEMPFILEPATH}"
+rm -f "${TEMPFILEPATH}"
+TEMPFILEPATH="/proc/self/fd/3"
+
+
+
+##############################################
+#### global variables with default values ####
+
+# log level, defaults to WARN
+# but can be changed by cmd-line options
+# MUST be one of: debug, info, warn, error
+LOG_LEVEL="warn"
+LOG_LEVEL_ENUM_ALL=("debug" "info" "warn" "error")
+LOG_LEVEL_ENUM_DEBUG=("debug")
+LOG_LEVEL_ENUM_INFO=("debug" "info")
+LOG_LEVEL_ENUM_WARN=("debug" "info" "warn")
+LOG_LEVEL_ENUM_ERROR=("debug" "info" "warn" "error")
+
+# the configuration file used
+CONFIG_FILEPATH="${etcdir}/acme-wrapper.conf"
+
+# the domains.list file used
+DOMAINSLIST_FILEPATH="${etcdir}/domains.list"
+
+# whether the command line specified --all-domains (i.e. check/process all
+# requested certificates from etc/domains.list)
+OPT_ALL_DOMAINS=0
+
+# all COMMAND options specified
+declare -a CMDS
+CMDS=()
+
+# the active configuration line: a space-separated list of fully qualified
+# domain names, here stored in form of a bash array
+declare -a FQDNS
+FQDNS=()
+
+
+
+###############################################################################
+############################# UTILITY PROCEDURES ##############################
+###############################################################################
+
+##
+## just echo to stderr
+##
+## parameters: any
+## stdout: no
+## stderr: the parameters
+##
+function echoerr() {
+    echo "$@" >&2
+    return $EX_OK
 }
 
-echolog() {
-    echo "[$$]" "$@"
-}
-
-printhelp() {
-    echoerr "$0 [COMMAND] [OPTIONS] [FQDN] [SANs]"
-    echoerr ""
-    echoerr "wrapper around acme-tiny intended to be automatically executed"
-    echoerr "by cron et al"
-    echoerr ""
-    echoerr "COMMAND:"
-    echoerr ""
-    echoerr "  Unless otherwise noted, each command might succeed or fail but"
-    echoerr "  does not leave intermediate state"
-    echoerr ""
-    echoerr "  --help  display this help and exit"
-    echoerr ""
-    echoerr "  --fsck  perform selfcheck on own data"
-    echoerr ""
-    echoerr "  --account-create  generate a new rsa key-pair used as"
-    echoerr "      letsencrypt account"
-    echoerr ""
-    echoerr "  --domain-new-key  create a new rsa keypair named after the"
-    echoerr "      first FQDNS (SANs are ignored)"
-    echoerr ""
-    echoerr "  --domain-new-csr  create a new certificate signing request for"
-    echoerr "      given FQDN(s) if more than one fqdn are given, subject"
-    echoerr "      alternative names will be used accordingly"
-    echoerr ""
-    echoerr "  --domain-submit-csr  submit the csr in order to receive a (new)"
-    echoerr "      certificate with CN set to the first fqdn and all fqdns"
-    echoerr "      set as SAN (if there are more than one fqdn)"
-    echoerr ""
-    echoerr "      Daniel Roesler's acme-tiny <https://github.com/diafygi/acme-tiny>"
-    echoerr "      is used to communicate with the letsencrypt server"
-    echoerr ""
-    echoerr "      challenges are placed into the ACME_CHALLENGE_DIR directory"
-    echoerr "      which must be available to the letsencrypt server via HTTP(s)"
-    echoerr "      at the appropriate URLs"
-    echoerr ""
-    echoerr "  --chain-retrieve  inspect the current certificate for given fqdn"
-    echoerr "      and retrieve the certificates up the chain, as referenced"
-    echoerr "      inside the certificate."
-    echoerr "      will create a crt+bundle file beside the certificate."
-    echoerr "      will create a crt+bundle+key file besode the key."
-    echoerr ""
-    echoerr "  --automatic-upkeep  do everything to in order to get a generic"
-    echoerr "      certificate; usually combined with the --all options and"
-    echoerr "      called from cron."
-    echoerr "      - for each FQDN (in case of '--all', for each line in "
-    echoerr "        etc/domains.list):"
-    echoerr "        - create account key if not yet created"
-    echoerr "        - if no certificate exists or newest existing certificate"
-    echoerr "          is expired or will expire within RESUBMIT_BEFORE"
-    echoerr "          seconds:"
-    echoerr "          - create domain key"
-    echoerr "          - create domain csr"
-    echoerr "          - submit domain csr (via acme-tiny client)"
-    echoerr "          - try to have a full chain of certificates for that new"
-    echoerr "            domain crt, possibly downloading issuer certificates"
-    echoerr "            (also creates crt+bundle file)"
-    echoerr ""
-    echoerr "OPTIONS:"
-    echoerr ""
-    echoerr "  --all  all lines from etc/domains.list are interpreted each as"
-    echoerr "      FQDNs with optional additional SANs. the specified command"
-    echoerr "      will be executed for each line. Each line is executed as"
-    echoerr "      seperate operation which might succeed or fail but does"
-    echoerr "      not leave intermediate states."
-    echoerr ""
-    echoerr "FQDN:"
-    echoerr ""
-    echoerr "  the first non-option parameter is the fully qualified domain name"
-    echoerr "  of the certificate to be processed by the command"
-    echoerr ""
-    echoerr "SAN(s):"
-    echoerr ""
-    echoerr "  all other non-option parameters are additional fqdns for the same"
-    echoerr "  certificate, used as subject-alternative-name(s)"
-    echoerr ""
-}
-
-parse_cmdline() {
+##
+## test if the first argument is equal to any of the other arguments
+## using with an array like this:
+##     StringEqualToAnyOf "$needle" "${haystack[@]}"
+## the return value is $EX_OK if $needle is equal to any of the other strings,
+## or $EX_NO otherwise.
+##
+## if there are zero haystack-strings (the empty set), $EX_NO is returned.
+## if there also needle is missing the result is undefined.
+##
+## Synopsis:
+##     StringEqualToAnyOf NEEDLE [HAYSTACKELEMENT1] [HAYSTACKELEMENT2] ...
+##
+function StringEqualToAnyOf() {
     [[ "$#" -eq 0 ]] && {
+        # no needle given
+        logerror "misuse of ${FUNCNAME[0]}: NEEDLE mssing."
+        return $EX_MISUSE_OF_BUILTIN
+    }
+    [[ "$#" -eq 1 ]] && {
+        # needle is never part of the empty set
+        return $EX_NO
+    }
+    local e
+    for e in "${@:2}"; do
+        [[ "$e" == "$1" ]] && {
+            return $EX_OK;
+        }
+    done
+    return $EX_NO
+}
+
+##
+## log messages, if appropriate log level
+## currently the log message is only logged to stderr, but an improvement
+## would be support for syslog or similar
+##
+## parameters: the message text
+## stderr: the log message
+##
+function logerror() {
+    StringEqualToAnyOf "${LOG_LEVEL}" "${LOG_LEVEL_ENUM_ERROR[@]}" && {
+        echo "[$$] ERROR: ${FUNCNAME[1]}: $@" >&2
+    }
+    return $EX_OK
+}
+
+## see logerror
+function logwarn() {
+    StringEqualToAnyOf "${LOG_LEVEL}" "${LOG_LEVEL_ENUM_WARN[@]}" && {
+        echo "[$$] WARN: ${FUNCNAME[1]}: $@" >&2
+    }
+    return $EX_OK
+}
+
+## see logerror
+function loginfo() {
+    StringEqualToAnyOf "${LOG_LEVEL}" "${LOG_LEVEL_ENUM_INFO[@]}" && {
+        echo "[$$] INFO: ${FUNCNAME[1]}: $@" >&2
+    }
+    return $EX_OK
+}
+
+## see logerror
+function logdebug() {
+    StringEqualToAnyOf "${LOG_LEVEL}" "${LOG_LEVEL_ENUM_DEBUG[@]}" && {
+        echo "[$$] DEBUG: ${FUNCNAME[1]}: $@" >&2
+    }
+    return $EX_OK
+}
+
+
+##
+## resolves the given identifier to the currently active date_identifier
+## in the database.
+##
+## parameter: identifier
+## stdout: date_identifier
+## return: EX_OK if could be resolved, EX_NO if not.
+##
+function ResolveToDateIdentifier()
+{
+    [[ "$#" -eq 1 ]] || {
+        logerror "need exactly one argument"
+        return $EX_MISUSE_OF_BUILTIN
+    }
+    local identifier="$1"
+    local dabsactivedirpath="${databasedir}/active/${identifierstr}"
+    [[ -e "${dabsactivedirpath}" ]] || {
+        logdebug "file not found: ${dabsactivedirpath}"
+        return $EX_NO
+    }
+    local dabsitem_symlink=$(readlink -n "${dabsactivedirpath}")
+    [[ "$?" -eq "${EX_OK}" ]] || {
+        logwarn "couldn't readlink, assuming bad database item:"\
+            "${dabsactivedirpath}"
+        return $EX_NO
+    }
+    local dateidentifierstr="$(basename "${dabsitem_symlink}")"
+    [[ "$?" -eq "${EX_OK}" ]] || {
+        logwarn "could not call 'basename', assuming bad database item:"\
+            "${dabsitem_symlink}"
+        return $EX_NO
+    }
+    logdebug "resolved ${identifierstr} => ${dateidentifierstr}"
+    echo -n "${dateidentifierstr}"
+    return $EX_OK
+}
+
+
+##
+## return a new date_identifier
+##
+## parameters: FQDN [SANs]
+## stdout: date_identifier
+##
+DateIdentifier_counter=0
+function DateIdentifier()
+{
+    [[ "$#" -gt 0 ]] || {
+        logerror "need FQDNS as parameters"
+        return $EX_MISUSE_OF_BUILTIN
+    }
+    local identifierstr="$(SpoolIdentifier "$@}")"
+    local datestr="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
+    local dateidentifierstr="${datestr}-${identifierstr}"
+    ((UniqueIdentifier_counter++))
+    echo -n "${dateidentifierstr}"
+    return $EX_OK
+}
+
+
+##
+## prints to stdout a random identifier usable for directory or file names.
+##
+## tries to return unique names, even if
+##   - called in rapid succession
+##   - simultaniously called by multiple processes
+## tries to make the directories date-sortable by normal human interfaces
+##
+## parameters: none
+## stdout: a non-empty string restricted to characters [a-zA-Z0-9-]
+##
+UniqueIdentifier_counter=0
+function UniqueIdentifier() {
+    local str="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
+    [[ "$?" -ne "${EX_OK}" ]] && {
+        logerror "could not call 'date'"
+        return $EX_OSFILE
+    }
+    ((UniqueIdentifier_counter++))
+    echo -n "${str}"
+    return $EX_OK
+}
+
+
+##
+## prints to stdout a determenistic identifier usable for directory or file
+## names.
+## equal parameters result in equal identifiert.
+## unequal parameters most certainly result in unequal identfiers.
+##
+## implementation detail: currently a UUID Version 5 with unspecified namespace
+## is created.
+##
+## parameters: FQDN [SANs]
+## stdout: a non-empty string restricted to characters [a-zA-Z0-9-]
+##
+function SpoolIdentifier() {
+    local name="$(echo "DNS:${@}" | sed -re 's/ /,DNS:/g')"
+    local sha1="$(sha1sum <<<"$name" | cut -d " " -f1)"
+    [[ "$?" -ne "${EX_OK}" ]] && {
+        logerror "could not call 'sha1sum'"
+        return $EX_OSFILE
+    }
+    local version="5"
+    local bits="${sha1:12:1}"
+    case "${bits}" in
+        0)    bits="8" ;;
+        1)    bits="9" ;;
+        2)    bits="a" ;;
+        3)    bits="b" ;;
+        4)    bits="8" ;;
+        5)    bits="9" ;;
+        6)    bits="a" ;;
+        7)    bits="b" ;;
+        8)    bits="8" ;;
+        9)    bits="9" ;;
+        a|A)  bits="a" ;;
+        b|B)  bits="b" ;;
+        c|C)  bits="8" ;;
+        d|D)  bits="9" ;;
+        e|E)  bits="a" ;;
+        f|F)  bits="b" ;;
+        *)
+            logerror "Programming error"
+            exit $EX_SOFTWARE
+    esac
+    local uuid="${sha1:0:8}-${sha1:8:4}-${version}${sha1:13:3}-${bits}${sha1:17:3}-${sha1:20:12}"
+    echo -n "${uuid}"
+    return $EX_OK
+}
+
+
+##
+## check the given database item for errors
+##
+## parameters: date_identifier of the database item
+## return: EX_OK if everything seems in order, EX_NO otherwise
+##
+function FsckDabsItem() {
+    [[ "$#" -eq 1 ]] || {
+        logerror "need one argument"
+        return $EX_MISUSE_OF_BUILTIN
+    }
+
+    local dateidentifierstr="$1"
+    local dabsitemdirpath="${databasedir}/items/${dateidentifierstr}"
+
+    logdebug "COMMAND: ${dabsitemdirpath}"
+
+    local dabskeyfilepath="${dabsitemdirpath}/key.pem"
+    local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
+    local dabschainfilepath="${dabsitemdirpath}/chain.pem"
+    local dabscrtchainfilepath="${dabsitemdirpath}/crt+chain.pem"
+    local dabscafilepath="${dabsitemdirpath}/ca.pem"
+    local dabsisfailed="${dabsitemdirpath}/isfailed.bool"
+
+    ## if item is marked as failed, it sticks
+    [[ -e "${dabsisfailed}" && "$(<"${dabsisfailed}")" -ne 0 ]] && {
+        logdebug "marked as failed: ${dabsisfailed}"
+        return $EX_NO
+    }
+
+    ## key.pem must exist and be readable
+    [[ -e "${dabskeyfilepath}" && -r "${dabskeyfilepath}" ]] || {
+        logdebug "not found or not readable: ${dabskeyfilepath}"
+        return $EX_NO
+    }
+    ## crt.pem must exist
+    [[ -e "${dabscrtfilepath}" && -r "${dabscrtfilepath}" ]] || {
+        logdebug "not found or not readable: ${dabscrtfilepath}"
+        return $EX_NO
+    }
+    ## chain.pem must exist
+    [[ -e "${dabschainfilepath}" && -r "${dabschainfilepath}" ]] || {
+        logdebug "not found or not readable: ${dabschainfilepath}"
+        return $EX_NO
+    }
+    ## crt+chain.pem must exist
+    [[ -e "${dabscrtchainfilepath}" && -r "${dabscrtchainfilepath}" ]] || {
+        logdebug "not found or not readable: ${dabscrtchainfilepath}"
+        return $EX_NO
+    }
+    ## ca.pem must exist
+    [[ -e "${dabscafilepath}" && -r "${dabscafilepath}" ]] || {
+        logdebug "not found or not readable: ${dabscafilepath}"
+        return $EX_NO
+    }
+
+    ## verify that certificate matches private key
+    ## if produces more than 1 line, fingerprints mismatch and thus
+    ## public key parts are different
+    local keydigest="$(set -o pipefail;
+        openssl rsa  -noout -modulus -in "${dabskeyfilepath}" \
+        | openssl sha256)"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'openssl'"
+        return $EX_OSERR
+    }
+    local crtdigest="$(set -o pipefail;
+        openssl x509 -noout -modulus -in "${dabscrtfilepath}" \
+        | openssl sha256)"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'openssl'"
+        return $EX_OSERR
+    }
+
+    ## Note: can only do this, because the sha256 digest doesn't contain \
+    local cnt="$(set -o pipefail; \
+        echo -e "${keydigest}\n${crtdigest}" \
+        | uniq \
+        | wc -l)"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call '| uniq | wc -l'"
+        return $EX_OSERR
+    }
+    [[ "${cnt}" -eq 1 ]] || {
+        logdebug "key and crt fingerprints mismatch: ${dabsitemdirpath}"
+        return $EX_NO
+    }
+
+
+    ## verify that the certificate chain validates
+    openssl verify -verbose \
+        -CAfile "${dabscafilepath}" \
+        -untrusted "${dabschainfilepath}" \
+        "${dabscrtfilepath}"
+    [[ "$?" -eq 0 ]] || {
+        logdebug "does not verify against ${dabscafilepath} + " \
+            "${dabschainfilepath}: ${dabscrtfilepath}"
+        return $EX_NO
+    }
+
+
+    return $EX_OK
+}
+
+
+
+###############################################################################
+################################## PRINTHELP ##################################
+###############################################################################
+
+##
+## help output
+##
+## stderr: the help
+##
+function printhelp() {
+    echo "NAME"
+    echo "    acme-wrapper -- automatic ssl-certificate updater and database"
+    echo ""
+    echo "SYNOPSIS"
+    echo "    ${MYNAME} [OPTIONS] [COMMAND] [--all-XXXX | FQDN [SANs]]"
+    echo ""
+    echo "SUMMARY"
+    echo ""
+    echo "  Tries to have rsa keys and x509 certificates available for the"
+    echo "configured domain names. This script generates rsa keypairs,"
+    echo "certificate signing requests, self-signed certificates and optionally"
+    echo "submits the csrs to letsencrypt.org in order to retrieve issued"
+    echo "certificates. Finally the resulting key and crt are stored with"
+    echo "several flavors so that different programs all find their required"
+    echo "format provided."
+    echo ""
+    echo "  This script wraps 'openssl' and 'acme-tiny.py' which do the"
+    echo "actual work."
+    echo ""
+    echo "  Updates in the database directory are made atomatically by first"
+    echo "preparing the new directory and only switching the symlink when"
+    echo "all checks pass."
+    echo ""
+    echo ""
+    echo "DEPENDENCIES:"
+    echo ""
+    echo "  Generation of rsa keys, csr, validation etc are"
+    echo "done using the program 'openssl'."
+    echo ""
+    echo "  Communication with letsencrypt's acme server is done using"
+    echo "Daniel Roesler's acme-tiny <https://github.com/diafygi/acme-tiny>"
+    echo "script."
+    echo ""
+    echo ""
+    echo "OPTIONS:"
+    echo ""
+    echo "  -q   synonym for --loglevel error"
+    echo ""
+    echo "  -v --verbose  synonym for --loglevel info"
+    echo ""
+    echo "  --loglevel [LEVEL]  changes the logging level printed to stderr"
+    echo "      possible levels: debug, info, warn, error."
+    echo "      Default: ${LOG_LEVEL}"
+    echo ""
+    echo "  --config  specify an alternative configuration file."
+    echo "      Default is '${CONFIG_FILEPATH}'."
+    echo "      Caveat: if you just specify a filename, it will be resolved"
+    echo "      relative to the working directory (like any relative path)"
+    echo "      and additionally searched for in PATH. This behaviour should"
+    echo "      be fixed in a future version."
+    echo ""
+    echo ""
+    echo "COMMAND:"
+    echo ""
+    echo "  --help  display this help and exit"
+    echo ""
+    echo "  --fsck  perform selfcheck on spool and database"
+    echo ""
+    echo "  --new-letsencrypt-account  generate a new rsa key-pair used as"
+    echo "      letsencrypt account"
+    echo ""
+    echo "  --new-item  creates a new spool item for the given FQDN+SANS."
+    echo "      Each FQDNS+SANs may at most have one uncommited item."
+    echo ""
+    echo "  --item-new-key  create a new rsa keypair in the spool item"
+    echo "      for the FQDN+SANs combination."
+    echo "      Key generation is done with the program 'openssl' found via"
+    echo "      the PATH environment variable."
+    echo ""
+    echo "  --item-new-csr  create a new certificate signing request in the"
+    echo "      spool item of the FQDN+SANs combination. if SANs is"
+    echo "      non-empty, the x509 extension 'Subject Alternative Name'"
+    echo "      will be used."
+    echo ""
+    echo "  --item-self-sign  self-signs the spool item's csr with the own"
+    echo "      rsa key."
+    echo ""
+    echo "  --item-submit-csr-to-letsencrypt  submit the csr from the spool"
+    echo "      item to letsencrypt in order to receive a (new) certificate"
+    echo "      with CN set to the first fqdn and all fqdns set as SAN (if"
+    echo "      there are more than one fqdn)."
+    echo ""
+    echo "      Challenges are placed into the ACME_CHALLENGE_DIR directory"
+    echo "      which must be available via http(s) to the letsencrypt"
+    echo "      server at the appropriate URLs."
+    echo ""
+    echo "  --item-chain-retrieve  inspect the certificate in the spool item"
+    echo "      for and retrieves the certificates up the chain, as"
+    echo "      referenced inside the certificate(s)."
+    echo "      will create a 'crt+chain' file with certificate and chain,"
+    echo "      and a 'crt+chain+key' file with additionally the key."
+    echo ""
+    echo "  --item-activate  the spool item is checked for errors, and if"
+    echo "      everything seems in order, is committed to the database."
+    echo "      By committing, the content of an item will not be changed"
+    echo "      or amended. After committing, the appropriate symlinks will"
+    echo "      be switched, thus making available the new certificate to"
+    echo "      applications."
+    echo ""
+    echo "  --item-fail  without further checking, the spool item is"
+    echo "      permanently marked as 'failed' and moved commited to the"
+    echo "      database. By committing, the content of an item will not be"
+    echo "      changed or amended."
+    echo "      No symlinks will be changed."
+    echo ""
+    echo "  --automatic-letsencrypt  does sensible things to keep a"
+    echo "      non-expired certificate ready in the database."
+    echo "      Usually called from cron in combination with the"
+    echo "      --all-domains option."
+    echo "      Uses Letsencrypt Certification Authority to issue"
+    echo "      certificates."
+    echo "      In summary, what the command does is:"
+    echo "      - create account key if not yet created"
+    echo "      - for each FQDN+SANs (in case of '--all', for each line in "
+    echo "        etc/domains.list):"
+    echo "        - if no spool item exists for this FQDN+SANs:"
+    echo "          - if the currently active item has no apparent errors"
+    echo "            and will not expire for some time (configuration"
+    echo "            RESUBMIT_BEFORE), leave this FQDN+SANs allone,"
+    echo "            successfully."
+    echo "          - else, create a new spool item and continue"
+    echo "        - inspect the spool item and execute the missing commands"
+    echo "          in order:"
+    echo "          - item-new-key"
+    echo "          - item-new-csr"
+    echo "          - item-submit-csr-to-letsencrypt"
+    echo "          - item-chain-retrieve"
+    echo "        - if everything went successful, execute item-active"
+    echo "        - else if an unrecoverable error occured (i.e. the item is"
+    echo "          believed to be damaged), execute item-fail"
+    echo ""
+    echo ""
+    echo "FQDN and SANs:"
+    echo ""
+    echo "  if no --all option is specified, the first non-option parameter"
+    echo "is the fully qualified domain name of the certificate to be"
+    echo "processed by the command. all other non-option parameters are"
+    echo "additional fqdns for the same certificate, used as subject"
+    echo "alternative name(s)."
+    echo ""
+    echo ""
+    echo "  if --all-domains is specified, all lines from etc/domains.list"
+    echo "are interpreted each as FQDNs with optional additional SANs. the"
+    echo "specified command will be executed separately for each line."
+    echo ""
+    echo ""
+    echo "SECURITY CONSIDERATIONS:"
+    echo ""
+    echo "  The program 'acme-tiny.py' was just downloaded from GitHub"
+    echo "without audit. No cryptographic signature was checked, because"
+    echo "none was provided."
+    echo ""
+    echo "  The program 'openssl' is unconditionally and fully"
+    echo "trusted."
+    echo ""
+    echo "  Until appropriate changes are made in this script, the config"
+    echo "file is included via the 'source' bash builtin command, and thus"
+    echo "must also be subject to the same security measures as this"
+    echo "script itself."
+    echo ""
+    return $EX_OK
+}
+
+
+
+
+###############################################################################
+############################# COMMAND PROCEDURES ##############################
+###############################################################################
+
+## 
+## parse the given parameters as commandline
+##
+## parameters: the command line
+## effects: sets the global user-configureable variables
+##
+function parse_cmdline() {
+    [[ "$#" -eq 0 ]] && {
+        # print "error message" if no parameters given
         printhelp
         return $EX_USAGE
     }
 
-    OPT_ALL=0
-    FQDNS=()
-
-    while [[ $# > 0 ]]
+    while [[ "$#" -gt 0 ]]
     do
-        key="$1"
+        local key="$1"
 
         case "$key" in
-            # commands
+            # options
+            -q)
+                LOG_LEVEL="error"
+                ;;
+            -v|\
+            --verbose)
+                LOG_LEVEL="info"
+                ;;
+            --loglevel)
+                arg="$2"
+                shift
+                StringEqualToAnyOf "$arg" "${LOG_LEVEL_ENUM_ALL[@]}"
+                case "$?" in 
+                    $EX_OK)
+                        LOG_LEVEL="$arg"
+                        ;;
+                    $EX_NO)
+                        logerror "invalid loglevel"
+                        return $EX_USAGE
+                        ;;
+                    *)
+                        logerror "could not call procedure 'StringEqualToAnyOf'"
+                        return $EX_UNAVAILABLE
+                        ;;
+                esac
+                ;;
+            --config)
+                CONFIG_FILEPATH="$2"
+                shift
+                ;;
+
+            ## commands ##
             --help)
                 printhelp
                 return $EX_USAGE
                 ;;
             --fsck)
-                CMD="fsck"
+                CMDS+=("fsck_everything")
                 ;;
-            --account-create|\
-            --account_create)
-                CMD="account_create"
+            --new-letsencrypt-account|\
+            --new_letsencrypt_account)
+                CMDS+=("new_letsencrypt_account")
                 ;;
-            --domain-new-key|\
-            --domain_new_key)
-                CMD="domain_new_key"
+            --new-item|\
+            --new_item)
+                CMDS+=("new_item")
                 ;;
-            --domain-new-csr|\
-            --domain_new_csr)
-                CMD="domain_new_csr"
+            --item-new-key|\
+            --item_new_key)
+                CMDS+=("item_new_key")
                 ;;
-            --domain-submit-csr|\
-            --domain_submit_csr)
-                CMD="domain_submit_csr"
+            --item-new-csr|\
+            --item_new_csr)
+                CMDS+=("item_new_csr")
                 ;;
-            --chain-retrieve|\
-            --chain_retrieve)
-                CMD="chain_retrieve"
+            --item-self-sign|\
+            --item_self_sign)
+                CMDS+=("item_self_sign")
+                ;;
+            --item-submit-csr-to-letsencrypt|\
+            --item_submit_csr_to_letsencrypt)
+                CMDS+=("item_submit_csr_to_letsencrypt")
+                ;;
+            --item-chain-retrieve|\
+            --item_chain_retrieve)
+                CMDS+=("item_chain_retrieve")
+                ;;
+            --item-activate|\
+            --item_activate)
+                CMDS+=("item_activate")
+                ;;
+            --item-fail|\
+            --item_fail)
+                CMDS+=("item_fail")
+                ;;
+            --automatic-letsencrypt|\
+            --automatic_letsencrypt)
+                CMDS+=("automatic_letsencrypt")
                 ;;
 
-            --automatic-upkeep|\
-            --automatic_upkeep)
-                CMD="automatic_upkeep"
+            ## selection of FQDNS ##
+            --all-domains)
+                OPT_ALL_DOMAINS=1
                 ;;
 
-            # options
-            --all)
-                OPT_ALL=1
+            ## unknown option ##
+            --*)
+                logerror "unknown option: $key"
+                return $EX_USAGE
                 ;;
 
-            # FQDNs (including SANs)
+            ## default for non-options is FQDN/SAN
             *)
+                # warn if command is still empty
+                [[ "${#CMDS[@]}" -eq 0 ]] && {
+                    logwarn "no command-option yet specified," \
+                        "but fqdn encountered: '$key'"
+                }
                 FQDNS+=("$key")
                 ;;
         esac
         shift
     done
 
-    [[ "$OPT_ALL" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
-        echoerr "ERROR: option --all and specifying FQDNs are mutually exclusive"
+    [[ "$OPT_ALL_DOMAINS" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
+        logerror "option --all-domains and specifying FQDN"\
+            "is mutually exclusive"
         return $EX_USAGE
     }
 
     return $EX_OK
 }
 
-datestring() {
-    echo "$(date +%Y-%m-%d-%H-%M-%S)"
-}
 
-fsck() {
+##
+## check the whole database and all spool items
+##
+function fsck_everything() {
+    # FIXME: implement
     return $EX_OK
 }
 
-account_create() {
-    [[ "${#FQDNS[@]}" -gt 0 ]] && {
-        echoerr "INFO: ignoring specified fqdns, the same account rsa keypair"
-        echoerr "is used for all remote operations"
-    }
 
-    # ask if account.key should be overwritten
-    [[ -e "${accountdir}/current" ]] && {
-        echoerr "WARN: private key file already exists: ${accountdir}/current"
-        read -p "Overwrite? [y|n] " yesno
-        [[ "$yesno" != "y" ]] && {
-            echoerr "aborting."
-            return $EX_NOINPUT
+##
+## always create a new account keypair
+## FQDN and SANs are silently ignored
+##
+function new_letsencrypt_account() {
+    # notify that account key is replaced
+    [[ -e "${letsencryptaccountdir}/current" ]] && {
+        local msgname
+        msgname="${letsencryptaccountdir}/current"
+        [[ -L "${msgname}" ]] && {
+            msgname="$(readlink "$msgname")"
         }
+        loginfo "replacing existing account keypair: ${msgname}"
     }
 
-    commit=1
+    local commit=1
 
     # make new directory in order to be able to roll back
-    datestr="$(datestring)"
-    mkdir -p "${accountdir}/${datestr}"
-    [[ "$?" -ne 0 ]] && commit=0;
+    identifierstr="$(UniqueIdentifier)"
+    [[ "$?" -eq "$EX_OK" && -n "${identifierstr}" ]] || {
+        logerror "could not call procedure 'UniqueIdentifier'"
+        return $EX_SOFTWARE
+    }
+    logdebug "NEW ACCOUNT: ${identifierstr}"
+    [[ ! -e "${letsencryptaccountdir}/${identifierstr}" ]] || {
+        logerror "already exists: ${letsencryptaccountdir}/${identifierstr}"
+        return $EX_SOFTWARE
+    }
+    mkdir "${letsencryptaccountdir}/${identifierstr}"
+    [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
-    keyfile="${accountdir}/${datestr}/account_key.pem"
-    pubfile="${accountdir}/${datestr}/account_pub.pem"
+    chmod 0700 "${letsencryptaccountdir}/${identifierstr}"
+    rm -f "${letsencryptaccountdir}/${identifierstr}/*"
 
-    linktarget="${datestr}"
-    linkfile="${accountdir}/current"
+    local keyfile="${letsencryptaccountdir}/${identifierstr}/account_key.pem"
+    local pubfile="${letsencryptaccountdir}/${identifierstr}/account_pub.pem"
 
-    echolog "INFO: Generating RSA keypair, ${RSA_KEY_BITS} bit long modulus"
-    openssl genpkey -algorithm RSA \
-        -pkeyopt rsa_keygen_bits:"$RSA_KEY_BITS" \
-        -out "${keyfile}" -outform PEM -text 2>/dev/null
-    [[ "$?" -ne 0 ]] && commit=0;
+    local linktarget="${identifierstr}"
+    local linkfile="${letsencryptaccountdir}/current"
+
+    loginfo "Generating RSA keypair, ${RSA_KEY_BITS} bit long modulus"
+    openssl genpkey -algorithm "RSA" \
+        -pkeyopt "rsa_keygen_bits:${RSA_KEY_BITS}" \
+        -out "${keyfile}" -outform "PEM" -text 2>/dev/null
+    [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
     openssl rsa -in "${keyfile}" -check -noout 
-    [[ "$?" -ne 0 ]] && commit=0;
+    [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
     openssl rsa -in "${keyfile}" -pubout -text > "${pubfile}"
-    [[ "$?" -ne 0 ]] && commit=0;
+    [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
     # commit transaction if no error
     if [[ "$commit" -eq 1 ]]; then
-        echoerr "DEBUG: commit work"
+        logdebug "commit work"
         ln -snf "${linktarget}" "${linkfile}"
+        loginfo "activated account keypair: ${identifierstr}"
     else
-        echoerr "ERROR: rollback work, previous state retained"
+        logerror "not activating new account"
         return $EX_UNAVAILABLE
     fi
 }
 
-domain_new_key() {
-    [[ "${#FQDNS[@]}" -lt 1 ]] && {
-        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+
+##
+## create a new spool item
+## error if it already exist
+##
+function new_item() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
         return $EX_USAGE
     }
-    [[ "${#FQDNS[@]}" -gt 1 ]] && {
-        echoerr "INFO: ignoring all SANs, only using ${FQDN[0]}"
+
+    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'SpoolIdentifier'"
+        return $EX_SOFTWARE
+    }
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    [[ ! -e "${spoolitemdirpath}" ]] || {
+        logerror "spool item already exists: ${spoolitemdirpath}"
+        return $EX_USAGE
     }
 
-    # ignore all but the first fqdn
-    fqdn_cn="${FQDNS[0]}"
-    datestr="$(datestring)"
-    filename="letsencrypt_${fqdn_cn}"
-    keyfile="${keysdir}/${datestr}_${filename}_key.pem"
-    linktarget="${datestr}_${filename}_key.pem"
-    linkfile="${keysdir}/${filename}_key.pem"
+    ## create the spool item directory
+    mkdir "${spoolitemdirpath}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'mkdir'"
+        return $EX_OSERR
+    }
 
-    commit=1
+    # store the FQDNS at the time of invoking
+    echo "${FQDNS[@]}" > "${spoolitemdirpath}/domain.list"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not write file: ${spoolitemdirpath}/domain.list"
+        return $EX_OSERR
+    }
 
-    openssl genpkey -algorithm RSA \
-        -pkeyopt rsa_keygen_bits:"$RSA_KEY_BITS" \
-        -out "${keyfile}" -outform PEM -text 2>/dev/null
-    [[ "$?" -ne 0 ]] && commit=0;
-
-    chmod g+r "${keyfile}"
-    [[ "$?" -ne 0 ]] && commit=0;
-
-    # commit transaction if no error
-    if [[ "$commit" -eq 1 ]]; then
-        echoerr "DEBUG: commit work"
-        ln -snf "${linktarget}" "${linkfile}"
-    else
-        echoerr "ERROR: rollback work, previous state retained"
-        return $EX_UNAVAILABLE
-    fi
+    return $EX_OK
 }
 
-domain_new_csr() {
-    [[ "${#FQDNS[@]}" -lt 1 ]] && {
-        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+
+##
+## generate a new private key in spool item
+## error if key already exists
+##
+function item_new_key() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
         return $EX_USAGE
     }
 
-    datestr="$(datestring)"
-    fqdn_cn="${FQDNS[0]}"
-    filename="letsencrypt_${fqdn_cn}"
-    # files read
-    keyfile="${keysdir}/${filename}_key.pem"
-    # files written
-    csrfile="${certsdir}/${datestr}_${filename}_csr.pem"
-    # written only if transaction-commit
-    linkfile="${certsdir}/${filename}_csr.pem"
-    linktarget="${datestr}_${filename}_csr.pem"
+    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'SpoolIdentifier'"
+        return $EX_SOFTWARE
+    }
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    local spoolkeyfilepath="${spoolitemdirpath}/key.pem"
 
-    [[ -r "${keyfile}" ]] || {
-        echoerr "ERROR: could not read ${keyfile}"
-        echoerr "maybe call '$0 --domain-new-key ${fqdn_cn}' first?"
-        return $EX_NOINPUT
+    openssl genpkey -algorithm "RSA" \
+        -pkeyopt "rsa_keygen_bits:${RSA_KEY_BITS}" \
+        -out "${spoolkeyfilepath}" \
+        -outform "PEM" -text 2>/dev/null
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'openssl'"
+        return $EX_UNAVAILABLE
     }
 
-    commit=1
+    return $EX_OK
+}
 
+
+##
+## generate a new certificate signing request in spool item
+## error if csr already exists
+## needs key already created inside spool item
+##
+function item_new_csr() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'SpoolIdentifier'"
+        return $EX_SOFTWARE
+    }
+
+    logdebug "COMMAND for ${FQDNS[@]} (${identifierstr})"
+
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    local spoolkeyfilepath="${spoolitemdirpath}/key.pem"
+    local spoolcsrfilepath="${spoolitemdirpath}/csr.pem"
+
+    ## check if key already exists
+    [[ -e "${spoolkeyfilepath}" ]] || {
+        logerror "need private key to create csr: ${spoolkeyfilepath}"
+        return $EX_USAGE
+    }
+
+    ## make csr without SAN
     if [[ "${#FQDNS[@]}" -eq 1 ]];
     then
-        # generate certificate with one CN and no SAN
+        local csr_cn="${FQDNS[0]}"
         openssl req -text \
             -new -sha256 \
-            -out "${csrfile}" \
-            -key "${keyfile}" \
+            -out "${spoolcsrfilepath}" \
+            -key "${spoolkeyfilepath}" \
             -config <(cat "$opensslconfig" - <<EOF
 [req_distinguished_name]
-    CN = ${fqdn_cn}
+    CN = ${csr_cn}
 EOF
-    )
-        [[ "$?" -ne 0 ]] && commit=0;
-    else
-        # generate certificate with all fqdns in SAN
-        fqdn_san="$(echo "DNS:${FQDNS[@]}" | sed -re 's/ /,DNS:/g')"
+            )
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call 'openssl'"
+            return $EX_UNAVAILABLE
+        }
 
+        chmod ug+r "${spoolcsrfilepath}"
+
+    ## make csr with SAN
+    else
+        local csr_cn="${FQDNS[0]}"
+        local csr_san="$(echo "DNS:${FQDNS[@]}" | sed -re 's/ /,DNS:/g')"
         # set first domain as CN for compatibility
         openssl req -text \
             -new -sha256 \
-            -out "${csrfile}" \
-            -key "${keyfile}" \
+            -out "${spoolcsrfilepath}" \
+            -key "${spoolkeyfilepath}" \
             -multivalue-rdn \
-            -subj "/CN=${fqdn_cn}" \
+            -subj "/CN=${csr_cn}" \
             -reqexts SAN \
             -config <(cat "$opensslconfig" - <<EOF
 [req_distinguished_name]
-    CN = ${fqdn_cn}
+    CN = ${csr_cn}
 [SAN]
-    subjectAltName = $fqdn_san
+    subjectAltName = ${csr_san}
 EOF
-    )
-        [[ "$?" -ne 0 ]] && commit=0;
-    fi
+            )
 
-    chmod g+r "${csrfile}"
-    [[ "$?" -ne 0 ]] && commit=0;
-
-    # commit transaction if no error
-    if [[ "$commit" -eq 1 ]]; then
-        echoerr "DEBUG: commit work"
-        ln -snf "${linktarget}" "${linkfile}"
-    else
-        echoerr "ERROR: rollback work, previous state retained"
-        return $EX_UNAVAILABLE
-    fi
-}
-
-domain_submit_csr() {
-    [[ "${#FQDNS[@]}" -lt 1 ]] && {
-        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
-        return $EX_USAGE
-    }
-
-    datestr="$(datestring)"
-    fqdn_cn="${FQDNS[0]}"
-    filename="letsencrypt_${fqdn_cn}"
-    # files read
-    accountkeyfile="${accountdir}/current/account_key.pem"
-    keyfile="${keysdir}/${filename}_key.pem"
-    csrfile="${certsdir}/${filename}_csr.pem"
-    # files written
-    crtfile="${certsdir}/${datestr}_${filename}_crt.pem"
-    # written only if transaction-commit
-    linkfile="${certsdir}/${filename}_crt.pem"
-    linktarget="${datestr}_${filename}_crt.pem"
-
-    commit=1
-
-    tmpcrt="$(mktemp)"
-    prevumask="$(umask)"
-    umask 022
-    python "${acme_tiny}" \
-        --account-key "${accountkeyfile}" \
-        --csr "${csrfile}" \
-        --acme-dir "${ACME_CHALLENGE_DIR}" \
-    > "${tmpcrt}"
-    [[ "$?" -ne 0 ]] && {
-        echoerr "ERROR: could not get signed certificate from letsencrypt"
-        commit=0;
-    }
-    umask "$prevumask"
-
-    # verify that certificate matches private key
-    ## if produces more than 1 line, fingerprints mismatch and thus
-    ## public key parts are different
-    [[ "${commit}" -eq 1 && "$(
-        (openssl x509 -noout -modulus -in "${tmpcrt}" | openssl md5 ;\
-         openssl rsa -noout -modulus -in "${keyfile}" | openssl md5) \
-         | uniq | wc -l)" -ne 1 ]] &&
-    {
-        echoerr "ERROR: received certificate does not match private key"
-        commit=0
-    }
-
-    [[ "$commit" -eq 1 ]] && {
-        openssl x509 -in "${tmpcrt}" -text > "${crtfile}"
-        [[ "$?" -ne 0 ]] && commit=0;
-    }
-
-    rm -f "${tmpcrt}"
-    [[ "$?" -ne 0 ]] && {
-        echoerr "WARN: could not remove temporary file: ${tmpcrt}"
-    }
-
-    [[ -e "${crtfile}" ]] && {
-        chmod g+r "${crtfile}"
-        [[ "$?" -ne 0 ]] && commit=0;
-    }
-
-    # only commit work if no error
-    if [[ "${commit}" -eq 1 ]]; then
-        ln -snf "${linktarget}" "${linkfile}"
-    else
-        echoerr "ERROR: rollback work, previous state retained"
-        return $EX_UNAVAILABLE
-    fi
-}
-
-chain_retrieve() {
-    [[ "${#FQDNS[@]}" -lt 1 ]] && {
-        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
-        return $EX_USAGE
-    }
-    [[ "${#FQDNS[@]}" -gt 1 ]] && {
-        echoerr "INFO: ignoring all SANs, only using ${FQDNS[0]}"
-    }
-
-    datestr="$(datestring)"
-    fqdn_cn="${FQDNS[0]}"
-    filename="letsencrypt_${fqdn_cn}"
-    pivottime=$(( $(date +%s) - RETRIEVE_COOLDOWN ))
-    # files read
-    keyfile="${keysdir}/${filename}_key.pem"
-    csrfile="${certsdir}/${filename}_csr.pem"
-    crtfile="${certsdir}/${filename}_crt.pem"
-    # files written
-    bundlefile="${certsdir}/${datestr}_${filename}_crt+bundle.pem"
-    bundlekeyfile="${keysdir}/${datestr}_${filename}_crt+bundle+key.pem"
-    # written only if transaction-commit
-    linkfile="${certsdir}/${filename}_crt+bundle.pem"
-    linktarget="${datestr}_${filename}_crt+bundle.pem"
-    linkkeyfile="${keysdir}/${filename}_crt+bundle+key.pem"
-    linkkeytarget="${datestr}_${filename}_crt+bundle+key.pem"
-
-    [[ -f "${crtfile}" ]] || {
-        echoerr "ERROR: no certificate file found for '${fqdn_cn}'"
-        return $EX_NOINPUT
-    }
-
-    # create temporary file for crt+bundle, but delete immediately
-    # in order to ensure cleanedup state in case of error
-    bundletmpfd="$(mktemp)"
-    exec 4<> "${bundletmpfd}"
-    rm -f "${bundletmpfd}"
-    bundletmpfd="/proc/$$/fd/4"
-
-    currentcertfile="${certsdir}/$(readlink ${crtfile})"
-    while true; do
-        # determine issuer certificate uri and filename
-        issuer_uri="$(
-            openssl x509 -in "${currentcertfile}" -noout -text \
-                | sed -n -re '/ +CA Issuers - URI:/s/[^:]*://p'
-        )"
-        issuer_file="${cadir}/$(echo "$issuer_uri" | sed -re 's/\//_/g')"
-
-        # check if no issuer certificate => we have reached root
-        [[ "${issuer_uri}" = "" ]] && {
-            break
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call 'openssl'"
+            return $EX_UNAVAILABLE
         }
 
-        # otherwise append the previous certificate to the crt+bundle
-        # because the final root certitificate should be inside of crt+bundle
-        # the first certificate added here will be the leaf
-        cat "${currentcertfile}" >> "${bundletmpfd}"
-
-        # retrieve issuer cert if not exists or not recently retrieved
-        [[ ! -r "${issuer_file}.pem"
-        || $(date -r "${issuer_file}.pem" +%s ) -lt $pivottime
-        ]] && {
-            tmpfile=$(mktemp)
-            curl -s "${issuer_uri}" > "${tmpfile}"
-
-            if [[ "$?" -eq 0 ]]; then
-                mv "${tmpfile}" "${issuer_file}"
-                chmod g+r "${issuer_file}"
-            else
-                rm -f "$tmpfile"
-                echoerr "ERROR: could not download issuer certificate from \
-                    '${issuer_uri}'"
-                return $EX_UNAVAILABLE
-            fi
-
-            # Note: the downloaded file might be PEM or DER encoded, and might
-            # provide the certificate in a x509 or pkcs7 container format
-
-            converted=0
-            tmpfile=$(mktemp)
-
-            # convert if x509 with DER:
-            [[ converted -eq 0 ]] && \
-            openssl x509 \
-                -inform DER -in "${issuer_file}" \
-                -text > "${tmpfile}" 2>/dev/null
-            [[ "$?" -eq 0 ]] && {
-                # it did work, use result
-                mv "${tmpfile}" "${issuer_file}.pem"
-                converted=1
-            }
-            # else try next
-            rm -f "${tmpfile}"
-
-            # convert if pkcs7 with DER:
-            [[ converted -eq 0 ]] && \
-            openssl pkcs7 -inform DER -in "${issuer_file}" \
-                -print_certs -text > "${tmpfile}" 2>/dev/null
-            [[ "$?" -eq 0 ]] && {
-                mv "${tmpfile}" "${issuer_file}.pem"
-                converted=1
-            }
-            # else try next
-            rm -f "${tmpfile}"
-
-            [[ -e "${issuer_file}.pem" ]] && {
-                chmod g+r "${issuer_file}.pem"
-            }
-
-            # no conversion method left, give up
-            [[ converted -eq 0 ]] && {
-                echoerr "ERROR: could not convert downloaded file into x509 PEM: ${issuer_uri}"
-                return $EX_UNAVAILABLE
-            }
-        }
-
-        currentcertfile="${issuer_file}.pem"
-    done
-
-    # rehash authority certificates after download
-    c_rehash "${cadir}" 2> /dev/null >/dev/null
-
-    # verify the certificate
-    openssl verify -CApath "${cadir}" "${crtfile}"
-    [[ "$?" -eq 0 ]] || {
-        echoerr "ERROR: the issued certificate '${crtfile}'"
-        echoerr "was not accepted as valid by this system"
-        return $EX_UNAVAILABLE
-    }
-
-    openssl verify -CApath "${cadir}" "${bundletmpfd}"
-    [[ "$?" -eq 0 ]] || {
-        echoerr "ERROR: the newly created certificate bundle"
-        echoerr "was not accepted as valid by this system"
-        return $EX_UNAVAILABLE
-    }
-
-    # no errors, so store crt+bundle in proper filename
-    cat "${bundletmpfd}" > "${bundlefile}"
-    chmod g+r "${bundlefile}"
-    cat "${bundlefile}" > "${bundlekeyfile}"
-    cat "${keyfile}" >> "${bundlekeyfile}"
-    chmod g+r "${bundlekeyfile}"
-    # plus create symlink
-    ln -snf "${linktarget}" "${linkfile}"
-    ln -snf "${linkkeytarget}" "${linkkeyfile}"
+        chmod ug+r "${spoolcsrfilepath}"
+    fi
 
     return $EX_OK
 }
 
-automatic_upkeep() {
-    [[ "${#FQDNS[@]}" -lt 1 ]] && {
-        echoerr "ERROR: no domainnames given: ${#FQDNS[@]}"
+
+##
+## use acme-tiny to retrieve the certificate from letsencrypt server
+##
+function item_submit_csr_to_letsencrypt() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
         return $EX_USAGE
     }
 
-    # save original FQDNS, because we only pass some parts of it
-    # to sub-command in order to avoid warnings about ignored FQDNs/SANs
-    local orig_FQDNS=("${FQDNS[@]}")
-
-    # common files and paths
-    datestr="$(datestring)"
-    fqdn_cn="${FQDNS[0]}"
-    filename="letsencrypt_${fqdn_cn}"
-    # symlinks to current files
-    keyfile="${keysdir}/${filename}_key.pem"
-    csrfile="${certsdir}/${filename}_csr.pem"
-    crtfile="${certsdir}/${filename}_crt.pem"
-    bundlefile="${certsdir}/${filename}_crt+bundle.pem"
-
-    # remember old symlink targets for rollback
-    local keylinktarget="$(readlink "${keyfile}")"
-    local csrlinktarget="$(readlink "${csrfile}")"
-    local crtlinktarget="$(readlink "${crtfile}")"
-    local bundlelinktarget="$(readlink "${bundlefile}")"
-
-    # 1. create account key if missing
-    FQDNS=()
-    [[ -f "${accountdir}/current/account_key.pem" ]] || {
-        # create new account key
-        account_create
-        [[ "$?" -ne 0 ]] && {
-            echoerr "ERROR: could not create account key"
-            return $EX_UNAVAILABLE
-        }
+    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'SpoolIdentifier'"
+        return $EX_SOFTWARE
     }
 
-    # 2. check if certificate does not exist or is expiring shortly
-    FQDNS=("${orig_FQDNS[@]}")
-    echolog "CHECK ${FQDNS[@]}"
+    logdebug "COMMAND for ${FQDNS[@]} (${identifierstr})"
 
-    need_new_key_and_crt=0
+    local accountkeyfilepath="${letsencryptaccountdir}/current/account_key.pem"
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    local spoolkeyfilepath="${spoolitemdirpath}/key.pem"
+    local spoolcsrfilepath="${spoolitemdirpath}/csr.pem"
+    local spoolcrtfilepath="${spoolitemdirpath}/crt.pem"
 
-    if [[ -e "${crtfile}" ]];
-    then # exists but is old
-        openssl x509 -checkend "${RESUBMIT_BEFORE}" -in "${crtfile}"
-        [[ "$?" -eq 0 ]] || {
-            echolog "EXPIRING (will cause CREATE): ${crtfile}"
-            need_new_key_and_crt=1
-        }
-    else # does not exit
-        echolog "NOTFOUND (will cause CREATE): ${crtfile}"
-        need_new_key_and_crt=1
-    fi
-
-    # if we need new certificate
-    [[ "${need_new_key_and_crt}" -eq 1 ]] && {
-        commit=1
-
-        # generate new key
-        [[ "${commit}" -eq 1 ]] && {
-            echolog "NEWKEY: ${FQDNS[@]}"
-            FQDNS=("${fqdn_cn}")
-            domain_new_key
-            r="$?"
-            FQDNS=("${orig_FQDNS}")
-            [[ "$r" -ne 0 ]] && {
-                echoerr "ERROR: could not create new domain key"
-                commit=0
-            }
-        }
-
-        # generate csr for key
-        [[ "${commit}" -eq 1 ]] && {
-            echolog "NEWCSR: ${FQDNS[@]}"
-            domain_new_csr
-            [[ "$?" -ne 0 ]] && {
-                echoerr "ERROR: could not create new domain csr"
-                commit=0
-            }
-        }
-
-        # submit csr and retrieve crt
-        [[ "${commit}" -eq 1 ]] && {
-            echolog "REQCRT: ${FQDNS[@]}"
-            domain_submit_csr
-            [[ "$?" -ne 0 ]] && {
-                echoerr "ERROR: could not retrieve new domain crt"
-                commit=0
-            }
-        }
-
-        # get issuer and root cert, create bundle
-        [[ "${commit}" -eq 1 ]] && {
-            echolog "BUNDLE: ${FQDNS[@]}"
-            chain_retrieve
-            [[ "$?" -ne 0 ]] && {
-                echoerr "ERROR: could not create bundle"
-                commit=0
-            }
-        }
-
-        # revert changes if something went wrong
-        [[ "${commit}" -ne 1 ]] && {
-            # revert symlink of key
-            [[ -n "${keylinktarget}" ]] &&
-                ln -snf "${keylinktarget}" "${keyfile}"
-            # revert symlink of csr
-            [[ -n "${csrlinktarget}" ]] &&
-                ln -snf "${csrlinktarget}" "${csrfile}"
-            # revert symlink of crt
-            [[ -n "${crtlinktarget}" ]] &&
-                ln -snf "${crtlinktarget}" "${crtfile}"
-            # revert symlink of bundle
-            [[ -n "${bundlelinktarget}" ]] &&
-                ln -snf "${bundlelinktarget}" "${bundlefile}"
-            return $EX_UNAVAILABLE
-        }
-
-        return $EX_OK
+    ## check if account key already exists
+    [[ -e "${accountkeyfilepath}" ]] || {
+        logerror "need account key: ${accountkeyfilepath}"
+        return $EX_USAGE
     }
+    ## check if key already exists
+    [[ -e "${spoolkeyfilepath}" ]] || {
+        logerror "need key: ${spoolkeyfilepath}"
+        return $EX_USAGE
+    }
+    ## check if csr already exists
+    [[ -e "${spoolcsrfilepath}" ]] || {
+        logerror "need csr: ${spoolcsrfilepath}"
+        return $EX_USAGE
+    }
+
+    local isselfsignfilepath="${spoolitemdirpath}/isselfsign.bool"
+    [[ -e "${isselfsignfilepath}" &&
+       "$(<"${isselfsignfilepath}")" -ne 0
+    ]] && {
+        logerror "spool item is already self-signed. make a new spool item."
+        return $EX_USAGE
+    }
+
+    ## acme-tiny doesn't work with the restrictive umask (files in
+    ## ACME_CHALLENGE_DIR are not made world-readable), thus temporarily
+    ## lower the umask.
+    touch "${spoolcrtfilepath}" # Note: create file with correct umask
+    prevumask="$(umask)"
+    umask 022
+    python "${acme_tiny}" \
+        --account-key "${accountkeyfilepath}" \
+        --csr "${spoolcsrfilepath}" \
+        --acme-dir "${ACME_CHALLENGE_DIR}" \
+        > "${spoolcrtfilepath}"
+        ## Note: redirects into already existing file in order to ensure proper
+        ## permissions of file at every point
+    [[ "$?" -ne "$EX_OK" ]] && {
+        logerror "could not get signed certificate from letsencrypt"
+        return $EX_UNAVAILABLE
+    }
+    umask "$prevumask"
+
+    echo 1 > "${spoolitemdirpath}/isletsencrypt.bool"
+
+    cat "${spoolcrtfilepath}" > "${TEMPFILEPATH}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'cat'"
+        return $EX_OSERR
+    }
+    openssl x509 -in "${TEMPFILEPATH}" -text > "${spoolcrtfilepath}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'openssl'"
+        return $EX_UNAVAILABLE
+    }
+
+    chmod ug+r "${spoolcrtfilepath}"
+
+    return $EX_OK
 }
 
-main() {
-    # if OPT_ALL, read all lines from etc/domains.list into $FQDNS[]
-    if [[ "$OPT_ALL" -eq 1 ]];
+
+##
+## inspect the certificate, retrieve the signator's certificate, and so on
+## up to the top certificate.
+##
+## include any thusly retrieves certificates in chain.pem in order, but
+## exclude the top-most certificate.
+## the top-most certificate (the CA certificate) is stored in ca.pem
+##
+function item_chain_retrieve() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'SpoolIdentifier'"
+        return $EX_SOFTWARE
+    }
+
+    logdebug "COMMAND for ${FQDNS[@]} (${identifierstr})"
+
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    local spoolcrtfilepath="${spoolitemdirpath}/crt.pem"
+    local spoolchainfilepath="${spoolitemdirpath}/chain.pem"
+    local spoolcrtchainfilepath="${spoolitemdirpath}/crt+chain.pem"
+    local spoolcafilepath="${spoolitemdirpath}/ca.pem"
+    ## check if crt already exists
+    [[ -e "${spoolcrtfilepath}" ]] || {
+        logerror "need crt: ${spoolcrtfilepath}"
+        return $EX_USAGE
+    }
+
+    # cleanup just in case because we use pattern later
+    rm -f "${spoolitemdirpath}/chain_"*".pem"
+
+    cat "${spoolcrtfilepath}" > "${TEMPFILEPATH}"
+    local chaincount=0
+    while true; do
+        # determine issuer certificate uri and filename
+        issuer_uri="$(
+            openssl x509 -in "${TEMPFILEPATH}" -noout -text \
+                | sed -n -re '/ +CA Issuers - URI:/s/[^:]*://p'
+        )"
+
+        # check if no issuer certificate => we have reached root
+        [[ "${issuer_uri}" = "" ]] && {
+            # store in ca.pem
+            cat "${TEMPFILEPATH}" > "${spoolcafilepath}"
+            # and end the loop
+            break
+        }
+
+        # store in chainfile
+        # (chain_0.pem will be crt.pem, chain_1.pem it's parent, etc)
+        local chainfilepath="${spoolitemdirpath}/chain_${chaincount}.pem"
+        cat "${TEMPFILEPATH}" > "${chainfilepath}"
+
+        # advance the chain counter
+        ((chaincount++))
+
+        # retrieve issuer cert
+        curl -s "${issuer_uri}" > "${TEMPFILEPATH}"
+
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not download issuer certificate from \
+                '${issuer_uri}'"
+            return $EX_UNAVAILABLE
+        }
+
+        ## Note: the downloaded content might be PEM or DER encoded, and might
+        ## provide the certificate in a x509 or pkcs7 container format
+        ## The "solution" is to just try all possible combination until one
+        ## seems to work
+
+        local converted=0
+        local convertedfilepath="$(mktemp)"
+        exec 4<>"${convertedfilepath}"
+        rm -f "${convertedfilepath}"
+        convertedfilepath="/proc/self/fd/4"
+
+        # try convert if x509 with DER:
+        [[ converted -eq 0 ]] && \
+        openssl x509 \
+            -inform "DER" -in "${TEMPFILEPATH}" \
+            -text > "${convertedfilepath}" 2>/dev/null
+        [[ "$?" -eq "$EX_OK" ]] && {
+            # it did work, use result
+            cat "${convertedfilepath}" > "${TEMPFILEPATH}"
+            converted=1
+        }
+        # else
+
+        # try convert if pkcs7 with DER:
+        [[ converted -eq 0 ]] && \
+        openssl pkcs7 \
+            -inform "DER" -in "${TEMPFILEPATH}" \
+            -print_certs \
+            -text > "${convertedfilepath}" 2>/dev/null
+        [[ "$?" -eq "$EX_OK" ]] && {
+            cat "${convertedfilepath}" > "${TEMPFILEPATH}"
+            converted=1
+        }
+        # else
+
+        # no conversion method left, give up
+        [[ converted -ne 0 ]] || {
+            logerror "could not convert downloaded file into x509 PEM: ${issuer_uri}"
+            return $EX_UNAVAILABLE
+        }
+    done
+
+
+    ## concat all chain_* files together (chain_0.pem is duplicate of crt.pem)
+    rm "${spoolitemdirpath}/chain_0.pem"
+    cat "${spoolitemdirpath}/chain_"*".pem" \
+        > "${spoolchainfilepath}"
+    cat "${spoolcrtfilepath}" "${spoolchainfilepath}" \
+        > "${spoolcrtchainfilepath}"
+
+
+    return $EX_OK
+}
+
+
+##
+## if the spool item would result in an fsck-ok database item, commit item
+## to database and activate it.
+## otherwise return with error and leave previous state as is.
+##
+function item_activate() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+    ## implementation:
+    ##   copy the item into database
+    ##   perform FsckDabsItem
+    ##    - if pass: set symlinks
+    ##               remove spool item
+    ##    - if fail: remove copied files
+    ##
+
+    local identifierstr="$(SpoolIdentifier "${FQDNS[@]}")"
+    local dateidentifierstr="$(DateIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'DateIdentifier'"
+        return $EX_SOFTWARE
+    }
+
+    dabsitemdirpath="${databasedir}/items/${dateidentifierstr}"
+    spoolitemdirpath="${spooldir}/${identifierstr}"
+
+    [[ -d "${spoolitemdirpath}" ]] || {
+        logerror "spool item not found: ${spoolitemdirpath}"
+        return $EX_NOINPUT
+    }
+
+    mkdir "${dabsitemdirpath}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'mkdir'"
+        return $EX_UNAVAILABLE
+    }
+
+    cp --recursive \
+        --no-dereference \
+        --preserve=timestamps \
+        --remove-destination \
+        --target-directory "${dabsitemdirpath}" \
+        "${spoolitemdirpath}/"*
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'cp'"
+        rm -Rf "${dabsitemdirpath}"
+        return $EX_UNAVAILABLE
+    }
+
+    FsckDabsItem "${dateidentifierstr}"
+    case "$?" in
+        $EX_OK) ;; # ok, go on
+        $EX_NO)
+            logerror "ROLLBACK: FsckDabsItem didn't succeed after copy"
+            rm -Rf "${dabsitemdirpath}"
+            return $EX_UNAVAILABLE
+        ;;
+        *)
+            logerror "could not call procedure 'FsckDabsItem' on new database"\
+                "item: ${dabsitemdirpath}"
+            return $EX_SOFTWARE
+        ;;
+    esac
+
+    ## activation
+    local linktarget="../items/${dateidentifierstr}"
+    local linkname="${databasedir}/active/${identifierstr}"
+    # do activation with one atomic operation
+    ln -snf -T "${linktarget}" "${linkname}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'ln', database may be inconsistent!"
+        return $EX_SOFTWARE
+    }
+
+    ## remove spool item
+    rm -Rf "${spoolitemdirpath}"
+
+    return $EX_OK
+}
+
+
+##
+## mark the spool item as failed, commit it to the database
+## (does not activate the item)
+##
+## TODO: the "commit" part of this procedure is a copy&paste from item_activate
+##
+function item_fail() {
+    [[ "${#FQDNS[@]}" -ge 1 ]] || {
+        logerror "no FQDN given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+    local identifierstr="$(SpoolIdentifier "${FQDNS[@]}")"
+    local dateidentifierstr="$(DateIdentifier "${FQDNS[@]}")"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'DateIdentifier'"
+        return $EX_SOFTWARE
+    }
+
+    logdebug "COMMAND for ${FQDNS[@]} (${identifierstr} => ${dateidentifierstr})"
+
+    dabsitemdirpath="${databasedir}/items/${dateidentifierstr}"
+    spoolitemdirpath="${spooldir}/${identifierstr}"
+
+    [[ -d "${spoolitemdirpath}" ]] || {
+        logerror "spool item not found: ${spoolitemdirpath}"
+        return $EX_NOINPUT
+    }
+
+    ## mark as failed
+    echo 1 > "${spoolitemdirpath}/isfailed.bool"
+
+    ## commit
+    mkdir "${dabsitemdirpath}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'mkdir'"
+        return $EX_UNAVAILABLE
+    }
+
+    cp --recursive \
+        --no-dereference \
+        --preserve=timestamps \
+        --remove-destination \
+        --target-directory "${dabsitemdirpath}" \
+        "${spoolitemdirpath}/"*
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'cp'"
+        rm -Rf "${dabsitemdirpath}"
+        return $EX_UNAVAILABLE
+    }
+
+    ## remove spool item
+    rm -Rf "${spoolitemdirpath}"
+
+    return $EX_OK
+}
+
+
+##
+## see printhelp
+##
+function automatic_letsencrypt() {
+    [[ "${#FQDNS[@]}" -le 0 ]] && {
+        logerror "no domainnames given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+
+    ## 1. create account key if missing
+    logdebug "CHECKING ACCOUNT KEY"
+    [[ -f "${letsencryptaccountdir}/current/account_key.pem" ]] || {
+        # create new account key
+        new_letsencrypt_account
+        [[ "$?" -ne "${EX_OK}" ]] && {
+            logerror "could not create account key"
+            return $EX_UNAVAILABLE
+        }
+    }
+    local accountkeyfilepath="${letsencryptaccountdir}/current/account_key.pem"
+
+
+    ## 2. determine if there is a spool item for this FQDN+SANs
+    ## if it is not, determine if certificate is expiring.
+    ## depening on the results, use the existing spool item, create a new one
+    ## or return with success.
+    local identifierstr="$(SpoolIdentifier "${FQDNS[@]}")"
+    logdebug "CHECK '${FQDNS[@]}' (${identifierstr})"
+
+    local spoolitemdirpath="${spooldir}/${identifierstr}"
+
+    # only look at the database if a spool item does not already exist
+    # check the database to either create a spool item, or determine
+    # that everything is OK and return from this procedure
+    [[ -e "${spoolitemdirpath}" ]] || {
+        # holds the result, whether the database item exists, is without error
+        # and is not expired / will expiry soon
+        local havegooddabs=1
+
+        local dateidentifierstr="$(ResolveToDateIdentifier "${identifierstr}")"
+        case "$?" in
+            "$EX_OK") ;; # could resolve, result was stored in $dabsitemdirpath
+            "$EX_NO") # could not resolve, cause new spool item to be created
+                havegooddabs=0
+                ;;
+            *) # should not happen
+                logerror "could not call procedure 'ResolveToDateIdentifier'"
+                return $EX_SOFTWARE
+        esac
+        local dabsitemdirpath="${databasedir}/items/${dateidentifierstr}"
+
+        # check if item exists and is directory
+        ((havegooddabs==1)) && {
+            [[ -d "${dabsitemdirpath}" ]] || {
+                loginfo "MISSING ${dabsitemdirpath}"
+                havegooddabs=0
+            }
+        }
+
+        # check fsck for any database item errors
+        ((havegooddabs==1)) && {
+            FsckDabsItem "${dateidentifierstr}"
+            case "$?" in
+                "$EX_OK") ;; # everything seems in order
+                "$EX_NO")    # some error was detected
+                    loginfo "UNCLEAN ${dabsitemdirpath}"
+                    havegooddabs=0
+                    ;;
+                *) # should not happen
+                    logerror "could not call procedure 'FsckDabsItem'"
+                    return $EX_SOFTWARE
+            esac
+        }
+
+        # finally check if, the otherwise good database item, is expired
+        # or will seen expiry
+        ((havegooddabs==1)) && {
+            local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
+            openssl x509 -checkend "${RESUBMIT_BEFORE}" -in "${dabscrtfilepath}"
+            [[ "$?" -eq "$EX_OK" ]] || {
+                loginfo "EXPIRED ${dabscrtfilepath}"
+                havegooddabs=0
+            }
+        }
+
+        # act upon the result. if the database item is not "good",
+        # initiate the procedure to acquire a replacement, otherwise
+        # return from this function successfully
+        if ((havegooddabs==1)); then
+            logdebug "GOOD ${dateidentifierstr}"
+            return $EX_OK
+        else
+            new_item
+            [[ "$?" -ne "${EX_OK}" ]] && {
+                logerror "could not create spool item for '${FQDNS[@]}'"
+                return $EX_UNAVAILABLE
+            }
+        fi
+    }
+    # if spool item does not exist at this point, this program has a bug
+    [[ -d "${spoolitemdirpath}" ]] || {
+        logerror "spool item directory does not exist:"\
+            "${spoolitemdirpath}"
+        return $EX_SOFTWARE
+    }
+
+
+    ## 3. check if key exists, else create it
+    [[ -e "${spoolitemdirpath}/key.pem" ]] || {
+        # does not exist, create key
+        item_new_key
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not create key: ${spoolitemdirpath}/key.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+
+    ## 4. check if csr exists, else create it
+    [[ -e "${spoolitemdirpath}/csr.pem" ]] || {
+        # does not exist, create csr
+        item_new_csr
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not create csr: ${spoolitemdirpath}/csr.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+
+    ## 5. check if crt exists, else request if from letsencrypt
+    [[ -e "${spoolitemdirpath}/crt.pem" ]] || {
+        # does not exist, retrieve crt
+        item_submit_csr_to_letsencrypt
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not retrieve crt: ${spoolitemdirpath}/crt.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+
+    ## 6. ensure the chain is retrieved
+    [[ -e "${spoolitemdirpath}/chain.pem" ]] || {
+        # does not exist, retrieve chain
+        item_chain_retrieve
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not retrieve chain: ${spoolitemdirpath}/chain.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+
+    ## 7. try to activate item
+    item_activate
+    [[ "$?" -eq "$EX_OK" ]] && {
+        logdebug "SUCCESS: ${FQDNS}"
+        return $EX_OK
+    }
+
+
+    ## 8. else fail the item
+    item_fail
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call procedure 'item_fail'"
+        return $EX_UNAVAILABLE
+    }
+
+
+    return $EX_OK
+}
+
+
+
+
+###############################################################################
+#################################### MAIN #####################################
+###############################################################################
+
+function main() {
+    # if OPT_ALL_DOMAINS, read all lines from etc/domains.list into $FQDNS[]
+    if [[ "$OPT_ALL_DOMAINS" -eq 1 ]];
     then
-        [[ -r "${etcdir}/domains.list" ]] || {
-            echoerr "ERROR: cannot read ${etcdir}/domains.list"
+        [[ -r "${DOMAINSLIST_FILEPATH}" ]] || {
+            logerror "cannot read ${DOMAINSLIST_FILEPATH}"
             return $EX_NOINPUT
         }
 
+        local line
         while read line; do
             # skip comments
             [[ "$line" =~ ^\ *# ]] && continue;
@@ -747,15 +1622,30 @@ main() {
             # fqdns
             FQDNS=($line)
             # execute command in subshell
-            "$0" "--${CMD}" "${FQDNS[@]}"
-        done <"${etcdir}/domains.list"
+            local cmd
+            for cmd in "${CMDS[@]}"; do
+                "${MYNAME}" --loglevel "${LOG_LEVEL}" "--${cmd}" "${FQDNS[@]}"
+            done
+        done <"${DOMAINSLIST_FILEPATH}"
     else
         # FQDNS already expanded/set by parse_cmdline
         # execute command
-        $CMD
+        local cmd
+        for cmd in "${CMDS[@]}"; do
+            "${cmd}"
+        done
     fi
 }
 
-umask 0077
-parse_cmdline "$@" && \
-main
+
+## get configuration
+[[ -r "${CONFIG_FILEPATH}" ]] || {
+    logerror "cannot read config file: ${CONFIG_FILEPATH}"
+    exit $EX_CONFIG
+}
+source "${CONFIG_FILEPATH}"
+
+
+## parse commandline, if successful, call main
+parse_cmdline "$@" && main
+
