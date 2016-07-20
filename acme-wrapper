@@ -837,6 +837,12 @@ function parse_cmdline() {
         esac
         shift
     done
+ 
+    # if no commands given, display help
+    [[ "${#CMDS[@]}" -eq 0 ]] && {
+        printhelp
+        return $EX_USAGE
+    }
 
     [[ "$OPT_ALL_DOMAINS" -eq 1 && "${#FQDNS[@]}" -gt 0 ]] && {
         logerror "option --all-domains and specifying FQDN"\
