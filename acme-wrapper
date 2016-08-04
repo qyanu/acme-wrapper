@@ -45,7 +45,7 @@ umask 077
 ##    - item_new_csr
 ##    - item_submit_csr_to_letsencrypt
 ##    - item_chain_retrieve
-##    - item_active
+##    - item_activate
 ##    - item_fail
 ##    - automatic_letsencrypt
 ## - main
@@ -342,7 +342,7 @@ function ResolveToDateIdentifier()
 ## parameters: FQDN [SANs]
 ## stdout: date_identifier
 ##
-DateIdentifier_counter=0
+DateIdentifier_counter="${DateIdentifier_counter:-0}"
 function DateIdentifier()
 {
     [[ "$#" -gt 0 ]] || {
@@ -369,7 +369,7 @@ function DateIdentifier()
 ## parameters: none
 ## stdout: a non-empty string restricted to characters [a-zA-Z0-9-]
 ##
-UniqueIdentifier_counter=0
+UniqueIdentifier_counter="${UniqueIdentifier_counter:-0}"
 function UniqueIdentifier() {
     local str="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
     [[ "$?" -ne "${EX_OK}" ]] && {
@@ -523,7 +523,8 @@ function FsckDabsItem() {
     openssl verify -verbose \
         -CAfile "${dabscafilepath}" \
         -untrusted "${dabschainfilepath}" \
-        "${dabscrtfilepath}"
+        "${dabscrtfilepath}" \
+        >/dev/null
     [[ "$?" -eq 0 ]] || {
         logdebug "does not verify against ${dabscafilepath} + " \
             "${dabschainfilepath}: ${dabscrtfilepath}"
@@ -1504,7 +1505,7 @@ function automatic_letsencrypt() {
             case "$?" in
                 "$EX_OK") ;; # everything seems in order
                 "$EX_NO")    # some error was detected
-                    loginfo "UNCLEAN ${dabsitemdirpath}"
+                    loginfo "UNCLEAN ${dabsitemdirpath} (\"${dateidentifierstr}\")"
                     havegooddabs=0
                     ;;
                 *) # should not happen
@@ -1517,7 +1518,9 @@ function automatic_letsencrypt() {
         # or will seen expiry
         ((havegooddabs==1)) && {
             local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
-            openssl x509 -checkend "${RESUBMIT_BEFORE}" -in "${dabscrtfilepath}"
+            openssl x509 -checkend "${RESUBMIT_BEFORE}" \
+                -in "${dabscrtfilepath}" \
+                >/dev/null 2>/dev/null
             [[ "$?" -eq "$EX_OK" ]] || {
                 loginfo "EXPIRED ${dabscrtfilepath}"
                 havegooddabs=0
