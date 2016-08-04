@@ -349,7 +349,7 @@ function DateIdentifier()
         logerror "need FQDNS as parameters"
         return $EX_MISUSE_OF_BUILTIN
     }
-    local identifierstr="$(SpoolIdentifier "$@}")"
+    local identifierstr="$(SpoolIdentifier "$@")"
     local datestr="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
     local dateidentifierstr="${datestr}-${identifierstr}"
     ((UniqueIdentifier_counter++))
