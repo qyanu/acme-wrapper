@@ -1368,6 +1368,14 @@ function item_activate() {
     ## remove spool item
     rm -Rf "${spoolitemdirpath}"
 
+    # set the fqdn symlinks to the activated item
+    # TODO: this is not rolled back
+    local linktarget="${linkname}"
+    for fqdn in "${FQDNS[@]}"; do
+        local linkname="${databasedir}/latest-by-fqdn/${fqdn}"
+        ln -snf -T "${linktarget}" "${linkname}"
+    done
+
     return $EX_OK
 }
 

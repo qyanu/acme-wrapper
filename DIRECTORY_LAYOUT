@@ -30,4 +30,6 @@
 ##     calculated from FQDN+SANs.
 ## database/active/<identifier> =>  # symlink to the currently active item for
 ##     that identifier. the symlink must be relative.
+## database/latest-by-fqdn/<fqdn> =>  # symlink to the uuid in database/active
+##     the symlink must be relative.
 ##
