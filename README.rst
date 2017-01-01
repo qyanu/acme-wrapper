@@ -17,9 +17,10 @@ Installation
 
 This package is designed to be a FHS 3.0 compliant "Add-on application software package" named ``acme-wrapper``.
 
-To install, using the included ``Makefile`` is recommended.
+To install, using the included ``Makefile`` is recommended:
 
 .. code:: bash
+
     make
     make install
     make install-crontab
