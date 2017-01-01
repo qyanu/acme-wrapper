@@ -1,5 +1,6 @@
 SHELL := /bin/bash
 PACKAGE := acme-wrapper
+VERSION := $(shell cat $(CURDIR)/VERSION)
 
 all:
 	@echo "done"
@@ -26,3 +27,10 @@ install:
 
 install-crontab:
 	install -D -m 0400 "$(CURDIR)/example/crontab.example" "/etc/cron.d/$(PACKAGE)"
+
+.PHONY: package
+package:
+	mkdir $(CURDIR)/$(PACKAGE)_$(VERSION)
+	cp -pr -t $(CURDIR)/$(PACKAGE)_$(VERSION) bin/ doc/ etc/ example/ install/ lib/ libexec/ share/ var/ LICENSE Makefile README.rst TODO VERSION
+	tar -C $(CURDIR) --numeric-owner -cjf $(PACKAGE)_$(VERSION).tar.bz2 $(PACKAGE)_$(VERSION)
+	rm -Rf $(CURDIR)/$(PACKAGE)_$(VERSION)
