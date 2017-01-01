@@ -1,5 +1,2 @@
- - use FHS directory
-
 debianize:
  - make package and stuff
-

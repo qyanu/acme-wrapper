@@ -34,7 +34,7 @@ umask 077
 ## - initial checks and global variables
 ##    - test for necessary executeables
 ##    - globals holding directory names/paths
-##    - globals configureable by user
+##    - globals configurable by user
 ## - utility procedures
 ## - printhelp
 ## - command procedures
@@ -130,11 +130,12 @@ function checkfilex() {
         echo "COULD NOT START: file is a directory: $1"
         exit "$EX_OSFILE"
     }
-    return $EX_OK
+    return "$EX_OK"
 }
 checkfilex /bin/cat
 checkfilex /bin/chmod
 checkfilex /bin/cp
+checkfilex /bin/cut
 checkfilex /bin/date
 checkfilex /bin/mktemp
 checkfilex /bin/readlink
@@ -144,6 +145,7 @@ checkfilex /bin/sed
 checkfilex /usr/bin/basename
 checkfilex /usr/bin/curl
 checkfilex /usr/bin/dirname
+checkfilex /usr/bin/find
 checkfilex /usr/bin/openssl
 checkfilex /usr/bin/sha1sum
 checkfilex /usr/bin/uniq
@@ -151,22 +153,47 @@ checkfilex /usr/bin/wc
 unset -f checkfilex
 
 
-
 ###################################
 #### directory names and paths ####
 
 MYNAME="$0"
+OPTPACKAGE="acme-wrapper"
 mydir="$(dirname "$0")"
-acme_tiny="${mydir}/acme-tiny/acme_tiny.py"
-etcdir="${mydir}/etc"
-libdir="${mydir}/lib"
-spooldir="${mydir}/spool"
-databasedir="${mydir}/database"
-letsencryptaccountdir="${mydir}/letsencrypt-account"
-cadir="${mydir}/authority"
+optdir="/opt/${OPTPACKAGE}"
+etcdir="/etc/opt/${OPTPACKAGE}"
+vardir="/var/opt/${OPTPACKAGE}"
+acme_tiny="${optdir}/libexec/acme-tiny/acme_tiny.py"
+libdir="${optdir}/lib"
+spooldir="${vardir}/spool"
+databasedir="${vardir}/database"
+letsencryptaccountdir="${vardir}/letsencrypt-account"
 opensslconfig="${libdir}/openssl.cnf"
 
 
+##############################################
+#### test if neccessary directories exist ####
+
+function checkdir() {
+    [[ -d "$1" ]] || {
+        echo "COULD NOT START: directory not found: $1"
+        exit "$EX_OSFILE"
+    }
+    return "$EX_OK"
+}
+function checkfile() {
+    [[ -f "$1" ]] || {
+        echo "COULD NOT START: file not found: $1"
+        exit "$EX_OSFILE"
+    }
+    return "$EX_OK"
+}
+checkdir "${optdir}"
+checkfile "${acme_tiny}"
+unset -f checkfile
+unset -f checkdir
+
+
+###############################################
 ## general purpose temporary file on disk
 ## automatically freed by OS upon exit
 TEMPFILEPATH="$(mktemp)"
@@ -1751,6 +1778,7 @@ function main() {
             "${cmd}"
         done
     fi
+    return $?
 }
 
 
@@ -1763,5 +1791,7 @@ source "${CONFIG_FILEPATH}"
 
 
 ## parse commandline, if successful, call main
+## this scripts exit code will be the exit code of either
+## parse_cmdline (if some error while parsing), or 
+## of main (success or fail)
 parse_cmdline "$@" && main
-

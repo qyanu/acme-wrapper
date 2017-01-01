@@ -1,0 +1,38 @@
+==================
+ DIRECTORY LAYOUT
+==================
+
+/var/opt/<package>/letsencrypt-account/<uniq_identifier>/
+    directory containing an account keypair
+    file ``account_key.pem`` the private part
+    file ``account_pub.pem`` the public part
+
+/var/opt/<package>/letsencrypt-account/current
+    symlink pointing to the currently active account
+
+/var/opt/<package>/spool/<identifier>/
+    idenifier is based on FQDN+SANs
+    file ``domain.list`` one line with the FQDN and SANs 
+    file ``key.pem``
+    file ``csr.pem``
+    file ``crt.pem``
+    file ``chain.pem`` the intermediate certificates, excluding the CA
+    file ``ca.pem`` the top-most ca-certificate which signed crt.pem
+    file ``crt+chain.pem`` crt and chain concatenated
+    file ``crt+chain+key.pem`` crt, chain and key concatenated
+    file ``isfailed.bool`` contains "true" or "false". Default: "false"
+    file ``isselfsign.bool`` contains "true" or "false". Default: "false"
+    file ``isletsencrypt.bool`` contains "true" or "false". Default: "false"
+
+/var/opt/<package>/database/items/<date_identifier>/
+    the primary hold for all commited items
+    items are named with datetime of their commit, plus their identifier
+    calculated from FQDN+SANs.
+
+/var/opt/<package>/database/active/<identifier>
+    symlink to the currently active item for
+    that identifier. the symlink must be relative.
+
+/var/opt/<package>/database/latest-by-fqdn/<fqdn>
+    symlink to the identifier containing the most recently issued certificate with a certificate for fqdn.
+    the symlink must be relative.

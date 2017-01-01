@@ -15,4 +15,4 @@ RETRIEVE_COOLDOWN=2592000 # seconds: 30 days
 
 # directory to write acme-challenge files into and that will be
 # publicly available at http://<domain>/.well-known/acme-challenge
-ACME_CHALLENGE_DIR="/var/www/acme-challenge"
+ACME_CHALLENGE_DIR="/var/opt/acme-wrapper/www"
