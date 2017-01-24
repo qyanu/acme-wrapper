@@ -4,6 +4,9 @@ umask 077
 CURDIR="$1"
 PACKAGE="$2"
 
+user="${PACKAGE}"
+group="${PACKAGE}"
+
 [[ -n "$CURDIR"
 && -d "$CURDIR"
 && -n "$PACKAGE"
@@ -28,15 +31,16 @@ cp -rT "${CURDIR}/var"     "/var/opt/${PACKAGE}"
 
 touch "/var/opt/${PACKAGE}/home/.rnd"
 
-chown -R root:acme-wrapper "/opt/${PACKAGE}"
-chown -R acme-wrapper:acme-wrapper "/var/opt/${PACKAGE}"
-chown -R :www-data "/var/opt/${PACKAGE}/www"
+chown -R    "root:${group}" "/opt/${PACKAGE}"
+chown -R "${user}:${group}" "/var/opt/${PACKAGE}"
+chown -R         :www-data  "/var/opt/${PACKAGE}/www"
 
 chmod -R u=rX,g=rX,o= "/opt/${PACKAGE}"
 chmod u+x "/opt/${PACKAGE}/bin/acme-wrapper"
 chmod u+x "/opt/${PACKAGE}/libexec/acme-tiny/acme_tiny.py"
 chmod u+w "/opt/${PACKAGE}/.rnd"
 chmod -R u=rwX,g=rX,o= "/var/opt/${PACKAGE}"
+chmod    o+x           "/var/opt/${PACKAGE}"  # www-data must read from subdir
 chmod -R g+rsX         "/var/opt/${PACKAGE}/www"
 
 # use default configuration if no config exists from before
