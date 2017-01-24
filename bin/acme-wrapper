@@ -1393,7 +1393,8 @@ function item_chain_retrieve() {
 
     ## concat all chain_* files together (chain_0.pem is duplicate of crt.pem)
     rm -f "${spoolitemdirpath}/chain_0.pem"
-    cat "${spoolitemdirpath}/chain_"*".pem" \
+    find "${spoolitemdirpath}" -maxdepth 1 -name "chain_*.pem" -print0 \
+        | xargs -0 cat \
         > "${spoolchainfilepath}"
     cat "${spoolcrtfilepath}" "${spoolchainfilepath}" \
         > "${spoolcrtchainfilepath}"
