@@ -135,7 +135,6 @@ function checkfilex() {
 checkfilex /bin/cat
 checkfilex /bin/chmod
 checkfilex /bin/cp
-checkfilex /bin/cut
 checkfilex /bin/date
 checkfilex /bin/mktemp
 checkfilex /bin/readlink
@@ -144,6 +143,7 @@ checkfilex /bin/rmdir
 checkfilex /bin/sed
 checkfilex /usr/bin/basename
 checkfilex /usr/bin/curl
+checkfilex /usr/bin/cut
 checkfilex /usr/bin/dirname
 checkfilex /usr/bin/find
 checkfilex /usr/bin/openssl

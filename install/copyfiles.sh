@@ -34,6 +34,7 @@ touch "/var/opt/${PACKAGE}/home/.rnd"
 chown -R    "root:${group}" "/opt/${PACKAGE}"
 chown -R "${user}:${group}" "/var/opt/${PACKAGE}"
 chown -R         :www-data  "/var/opt/${PACKAGE}/www"
+chown -R        ":${group}" "/etc/opt/${PACKAGE}"
 
 chmod -R u=rX,g=rX,o= "/opt/${PACKAGE}"
 chmod u+x "/opt/${PACKAGE}/bin/acme-wrapper"
@@ -42,14 +43,16 @@ chmod u+w "/opt/${PACKAGE}/.rnd"
 chmod -R u=rwX,g=rX,o= "/var/opt/${PACKAGE}"
 chmod    o+x           "/var/opt/${PACKAGE}"  # www-data must read from subdir
 chmod -R g+rsX         "/var/opt/${PACKAGE}/www"
+chmod -R g+rX          "/etc/opt/${PACKAGE}"
+chmod    g+s           "/etc/opt/${PACKAGE}"
 
 # use default configuration if no config exists from before
 if [[ -e "/etc/opt/${PACKAGE}/acme-wrapper.conf" ]]; then
     echo "leaving existing configuration file untouched"
     echo "/etc/opt/${PACKAGE}/acme-wrapper.conf"
 else
-    cp "/etc/opt/${PACKAGE}/acme-wrapper.conf-dist" \
-       "/etc/opt/${PACKAGE}/acme-wrapper.conf"
+    cp -p "/etc/opt/${PACKAGE}/acme-wrapper.conf-dist" \
+          "/etc/opt/${PACKAGE}/acme-wrapper.conf"
 fi
 
 # use empty domains.list if no list exists from before
@@ -57,6 +60,6 @@ if [[ -e "/etc/opt/${PACKAGE}/domains.conf" ]]; then
     echo "leaving existing domain list untouched"
     echo "/etc/opt/${PACKAGE}/domains.conf"
 else
-    cp "/etc/opt/${PACKAGE}/domains.list-dist" \
-       "/etc/opt/${PACKAGE}/domains.list"
+    cp -p "/etc/opt/${PACKAGE}/domains.list-dist" \
+          "/etc/opt/${PACKAGE}/domains.list"
 fi
