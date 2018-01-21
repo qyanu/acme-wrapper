@@ -1,0 +1,13 @@
+Source: acme-wrapper
+Section: unknown
+Priority: optional
+Maintainer: Christian M. Amsüss <chrysn@fsfe.org>
+Build-Depends: debhelper (>= 10)
+Standards-Version: 4.1.2
+Homepage: <insert the upstream URL, if relevant>
+
+Package: acme-wrapper
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, coreutils, curl, openssl, sed
+Description: <insert up to 60 chars description>
+ <insert long description, indented with spaces>
