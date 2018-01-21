@@ -6,12 +6,18 @@
 %:
 	dh $@
 
+override_dh_auto_clean:
+	chmod -x libexec/acme-tiny/acme_tiny.py
+
 override_dh_auto_install:
 	# don't call `make install`, that'd try to create users, /var files and
 	# doesn't support ${DESTDIR} (and even if it did, there wouldn't be
 	# much left of it if all the var and user creation parts were removed)
 
 override_dh_auto_configure:
+	# Workaround for https://github.com/diafygi/acme-tiny/pull/177
+	chmod +x libexec/acme-tiny/acme_tiny.py
+	
 	mkdir -p debian/etc
 	cp etc/acme-wrapper.conf-dist debian/etc/acme-wrapper.conf
 	cp etc/domains.list-dist debian/etc/domains.list

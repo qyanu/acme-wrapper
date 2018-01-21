@@ -8,6 +8,6 @@ Homepage: <insert the upstream URL, if relevant>
 
 Package: acme-wrapper
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, coreutils, curl, openssl, sed
+Depends: ${shlibs:Depends}, ${misc:Depends}, curl, openssl
 Description: <insert up to 60 chars description>
  <insert long description, indented with spaces>

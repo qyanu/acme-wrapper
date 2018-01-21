@@ -25,3 +25,4 @@ TODO:
 
 * Creating and setting permissions of /var files
 * Copyright file
+* Decide whether to ship acme-tiny or to rely on acme-tiny package
