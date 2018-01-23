@@ -3,4 +3,18 @@ set -e
 
 adduser --system --group --no-create-home --home /var/opt/acme-wrapper/home --gecos "user for automatic ssl-certificate updater and database" acme-wrapper
 
+mkdir -p /var/opt/acme-wrapper/database/active
+mkdir -p /var/opt/acme-wrapper/database/items
+mkdir -p /var/opt/acme-wrapper/database/latest-by-fqdn
+mkdir -p /var/opt/acme-wrapper/home
+mkdir -p /var/opt/acme-wrapper/letsencrypt-account
+mkdir -p /var/opt/acme-wrapper/spool
+mkdir -p /var/opt/acme-wrapper/www
+
+chown -R acme-wrapper: /var/opt/acme-wrapper
+chown :www-data /var/opt/acme-wrapper/www
+
+chmod -R u=rwx,gw=rx,o=x /var/opt/acme-wrapper
+chmod g+s  /var/opt/acme-wrapper/www
+
 #DEBHELPER#
