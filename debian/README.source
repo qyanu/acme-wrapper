@@ -21,6 +21,13 @@ Debian practice), for example:
   user's home directory.)
 * Change groups and owners of the files in /opt and /etc
 
+
+Checks to be done with the package:
+
+* `lintian *.deb`
+* `piuparts -d stable *.deb`
+* `cme check dpkg *.deb`
+
 TODO:
 
 * Copyright file

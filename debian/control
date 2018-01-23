@@ -1,13 +1,13 @@
 Source: acme-wrapper
-Section: unknown
+Section: admin
 Priority: optional
 Maintainer: Christian M. Amsüss <chrysn@fsfe.org>
 Build-Depends: debhelper (>= 10), python
 Standards-Version: 4.1.2
-Homepage: <insert the upstream URL, if relevant>
+Homepage: http://qyanu.net/software/acme-wrapper
 
 Package: acme-wrapper
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, curl, openssl, adduser
-Description: <insert up to 60 chars description>
+Description: wrapper for acme-tiny for reliable and automatical administration of SSL certificates
  <insert long description, indented with spaces>
