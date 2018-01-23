@@ -28,7 +28,11 @@ Checks to be done with the package:
 * `piuparts -d stable *.deb`
 * `cme check dpkg *.deb`
 
+Note that piuparts and lintian complain about issues with /opt or /etc/opt,
+which is to be expected.
+
 TODO:
 
-* Copyright file
 * Decide whether to ship acme-tiny or to rely on acme-tiny package
+* At one point in time, migrate away from /opt locations (with due
+  consideration for existing systems)
