@@ -14,7 +14,7 @@ mkdir -p /var/opt/acme-wrapper/www
 chown -R acme-wrapper: /var/opt/acme-wrapper
 chown :www-data /var/opt/acme-wrapper/www
 
-chmod -R u=rwx,gw=rx,o=x /var/opt/acme-wrapper
-chmod g+s  /var/opt/acme-wrapper/www
+chmod -R u=rwX,g=rX,o=X /var/opt/acme-wrapper
+chmod g+rsx  /var/opt/acme-wrapper/www
 
 #DEBHELPER#
