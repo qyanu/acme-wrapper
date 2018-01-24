@@ -29,7 +29,8 @@ Checks to be done with the package:
 * `cme check dpkg *.deb`
 
 Note that piuparts and lintian complain about issues with /opt or /etc/opt,
-which is to be expected.
+which is to be expected for the latter (given that /opt complaints are note
+overridable) and tracked in http://bugs.debian.org/888243 for the former.
 
 TODO:
 
