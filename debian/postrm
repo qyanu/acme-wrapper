@@ -15,4 +15,4 @@ case $1 in
         ;;
 esac
 
-rmdir --ignore-fail-on-non-empty /var/opt/acme-wrapper
+rmdir /var/opt/acme-wrapper || true
