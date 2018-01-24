@@ -34,3 +34,8 @@ package:
 	cp -pr -t $(CURDIR)/$(PACKAGE)_$(VERSION) bin/ doc/ etc/ example/ install/ lib/ libexec/ share/ var/ LICENSE Makefile README.rst TODO VERSION
 	tar -C $(CURDIR) --numeric-owner -cjf $(PACKAGE)_$(VERSION).tar.bz2 $(PACKAGE)_$(VERSION)
 	rm -Rf $(CURDIR)/$(PACKAGE)_$(VERSION)
+
+.PHONY: deb
+deb:
+	gbp buildpackage --git-ignore-branch --git-ignore-new
+	./debian/rules clean
