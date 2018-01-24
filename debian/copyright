@@ -8,7 +8,7 @@ License: GPL-2+
 
 Files: libexec/acme-tiny
 Copyright: 2015 Daniel Roesler
-License: MIT
+License: X11
 
 Files: debian/*
 Copyright: 2018 Christian M. Amsüss <chrysn@fsfe.org>
@@ -31,7 +31,7 @@ License: GPL-2+
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
 
-License: MIT
+License: X11
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
  in the Software without restriction, including without limitation the rights
