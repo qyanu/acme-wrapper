@@ -6,7 +6,7 @@ Files: *
 Copyright: 2016-2018 Max-Julian Pogner <max-julian@qyanu.net>
 License: GPL-2+
 
-Files: libexec/acme-tiny
+Files: libexec/acme-tiny/*
 Copyright: 2015 Daniel Roesler
 License: X11
 
