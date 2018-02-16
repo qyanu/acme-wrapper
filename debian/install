@@ -1,0 +1,7 @@
+bin/* /opt/acme-wrapper/bin/
+lib/* /opt/acme-wrapper/lib/
+libexec/acme-tiny/acme_tiny.py /opt/acme-wrapper/libexec/acme-tiny/
+
+# automatically flagged as conffiles by dh_installdeb
+# copied there for renaming in dh_auto_configure
+debian/etc/* /etc/opt/acme-wrapper/
