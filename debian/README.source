@@ -3,14 +3,14 @@ package, but changing those paths would mean modifying the scripts quite a bit.
 That should be easily doable, but is not priorized until the package should be
 eligible for upload to Debian.
 
-File copying and does not use the install script as that does quite a bunch of
-things that, in a Debian package, need to be spread out into regular
-installation and postinst scripts. Especially, the directory structure of ./var
-is re-encoded in the postinst scripts; the rationale being that even if the
-names of the directories could be shipped with the package (eg. by `find var
--type d > var-directories`), the information of how to chown all those
-directories needs to be explicit in the postinst script anyway, which can then
-just as well create them.
+File copying and setting of permissions does not use the scripts in ../install/
+as that does quite a bunch of things that, in a Debian package, need to be
+spread out into regular installation and postinst scripts. Especially, the
+directory structure of ./var is re-encoded in the postinst scripts; the
+rationale being that even if the names of the directories could be shipped with
+the package (eg. by `find var -type d > var-directories`), the information of
+how to chown all those directories needs to be explicit in the postinst script
+anyway, which can then just as well create them.
 
 
 Some things done by the installer script the package does not do (usually
@@ -22,11 +22,11 @@ Debian practice), for example:
 * Change groups and owners of the files in /opt and /etc
 
 
-Checks to be done with the package:
+Checks to be done after changing the package:
 
-* `lintian *.deb`
+* `cme check dpkg`
+* `lintian *.changes`
 * `piuparts -d stable *.deb`
-* `cme check dpkg *.deb`
 
 Note that piuparts and lintian complain about issues with /opt or /etc/opt,
 which is to be expected for the latter (given that /opt complaints are note
@@ -35,5 +35,11 @@ overridable) and tracked in http://bugs.debian.org/888243 for the former.
 TODO:
 
 * Decide whether to ship acme-tiny or to rely on acme-tiny package
+
+  Doing this is easier when, in a later development stage of acme-wrapper, the
+  variables in the "directory names and path" section are declared in the
+  executable script, and the rest of the script has moved into a bash script
+  that is then sourced from that wrapper.
+
 * At one point in time, migrate away from /opt locations (with due
   consideration for existing systems)

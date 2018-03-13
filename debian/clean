@@ -1,2 +1,2 @@
-# from dh_auto_configure
+# from dh_auto_configure, see rules
 debian/etc/
