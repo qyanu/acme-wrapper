@@ -16,7 +16,7 @@ install:
 	@echo
 	@echo "recommended additional command on debian:"
 	@echo
-	@echo "   apt-get install coreutils curl openssl sed"
+	@echo "   apt-get install coreutils curl openssl sed python"
 	@echo
 	@echo "finally, the make the directory"
 	@echo "   /var/opt/$(PACKAGE)/www"
