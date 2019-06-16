@@ -18,11 +18,12 @@ install:
 	@echo
 	@echo "   apt-get install coreutils curl openssl sed python"
 	@echo
-	@echo "finally, the make the directory"
+	@echo "finally, make the (existing) directory"
 	@echo "   /var/opt/$(PACKAGE)/www"
 	@echo "publicly accessible as"
 	@echo "   http://«domain»/.well-known/acme-challenge"
-	@echo "see the included example conf files."
+	@echo
+	@echo "See the included example conf files."
 	@echo
 
 install-crontab:
