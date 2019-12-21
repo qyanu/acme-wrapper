@@ -121,7 +121,7 @@ class TestModule(unittest.TestCase):
         except Exception as e:
             result = e
         self.assertIsInstance(result, ValueError)
-        self.assertIn("Invalid character in DNS name", result.args[0])
+        self.assertIn("Domain name contains an invalid character", result.args[0])
 
     def test_nonexistent_domain(self):
         """ Should be unable verify a nonexistent domain """
@@ -165,7 +165,7 @@ class TestModule(unittest.TestCase):
             "--csr", KEYS['domain_csr'].name,
             "--acme-dir", self.tempdir,
             "--directory-url", self.DIR_URL,
-            "--contact", "mailto:devteam@example.com", "mailto:boss@example.com",
+            "--contact", "mailto:devteam@gethttpsforfree.com", "mailto:boss@gethttpsforfree.com",
         ])
         sys.stdout.seek(0)
         crt = sys.stdout.read().encode("utf8")
@@ -175,7 +175,7 @@ class TestModule(unittest.TestCase):
         # make sure the certificate was issued and the contact details were updated
         out, err = Popen(["openssl", "x509", "-text", "-noout"], stdin=PIPE, stdout=PIPE, stderr=PIPE).communicate(crt)
         self.assertIn("Issuer: CN=Fake LE Intermediate", out.decode("utf8"))
-        self.assertIn("Updated contact details:\nmailto:devteam@example.com\nmailto:boss@example.com", log_string.decode("utf8"))
+        self.assertIn("Updated contact details:\nmailto:devteam@gethttpsforfree.com\nmailto:boss@gethttpsforfree.com", log_string.decode("utf8"))
         # remove logging capture
         acme_tiny.LOGGER.removeHandler(debug_handler)
 

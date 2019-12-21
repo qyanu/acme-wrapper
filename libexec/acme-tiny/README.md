@@ -54,7 +54,7 @@ wget -O - "https://gist.githubusercontent.com/JonLundy/f25c99ee0770e19dc595/raw/
 cp /etc/letsencrypt/accounts/acme-v01.api.letsencrypt.org/directory/<id>/private_key.json private_key.json
 
 # Create a DER encoded private key
-openssl asn1parse -noout -out private_key.der -genconf <(python conv.py private_key.json)
+openssl asn1parse -noout -out private_key.der -genconf <(python2 conv.py private_key.json)
 
 # Convert to PEM
 openssl rsa -in private_key.der -inform der > account.key
@@ -76,6 +76,9 @@ openssl genrsa 4096 > domain.key
 openssl req -new -sha256 -key domain.key -subj "/CN=yoursite.com" > domain.csr
 
 # For multiple domains (use this one if you want both www.yoursite.com and yoursite.com)
+openssl req -new -sha256 -key domain.key -subj "/" -addext "subjectAltName = DNS:yoursite.com, DNS:www.yoursite.com" > domain.csr
+
+# For multiple domains (same as above but works with openssl < 1.1.1)
 openssl req -new -sha256 -key domain.key -subj "/" -reqexts SAN -config <(cat /etc/ssl/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:yoursite.com,DNS:www.yoursite.com")) > domain.csr
 ```
 
@@ -129,7 +132,7 @@ configure an nginx server:
 ```nginx
 server {
     listen 443 ssl;
-    server_name yoursite.com, www.yoursite.com;
+    server_name yoursite.com www.yoursite.com;
 
     ssl_certificate /path/to/signed_chain.crt;
     ssl_certificate_key /path/to/domain.key;
@@ -145,7 +148,7 @@ server {
 
 server {
     listen 80;
-    server_name yoursite.com, www.yoursite.com;
+    server_name yoursite.com www.yoursite.com;
 
     location /.well-known/acme-challenge/ {
         alias /var/www/challenges/;
@@ -166,7 +169,8 @@ for example script).
 Example of a `renew_cert.sh`:
 ```sh
 #!/usr/bin/sh
-python /path/to/acme_tiny.py --account-key /path/to/account.key --csr /path/to/domain.csr --acme-dir /var/www/challenges/ > /path/to/signed_chain.crt || exit
+python /path/to/acme_tiny.py --account-key /path/to/account.key --csr /path/to/domain.csr --acme-dir /var/www/challenges/ > /path/to/signed_chain.crt.tmp || exit
+mv /path/to/signed_chain.crt.tmp /path/to/signed_chain.crt
 service nginx reload
 ```
 
