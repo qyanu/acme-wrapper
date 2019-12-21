@@ -28,7 +28,8 @@ rm -f "${TEMPFILE}"
 TEMPFILE="/proc/self/fd/3"
 
 
-extractdir="$PROJECTDIR/libexec/acme-tiny"
+extractreldir="libexec/acme-tiny"
+extractdir="$PROJECTDIR/$extractreldir"
 
 # download zip
 rm -Rf "$extractdir"
@@ -38,4 +39,15 @@ curl "$downloadurl" \
         "$extractdir"
 
 # add changes to index
-git add "$extractdir"
+git add -A "$extractdir"
+git commit --no-edit -F - <<MESSAGE
+import acme-tiny current master
+
+    commands where:
+
+      curl $downloadurl \
+        | tar -zx --overwrite --verbose --strip-components=1 \
+          -C $extractreldir
+      git add libexec/acme-tiny/
+
+MESSAGE
