@@ -340,18 +340,21 @@ function ResolveToDateIdentifier()
         return $EX_MISUSE_OF_BUILTIN
     }
     local identifier="$1"
-    local dabsactivedirpath="${databasedir}/active/${identifier}"
+    local dabsactivedirpath
+    dabsactivedirpath="${databasedir}/active/${identifier}"
     [[ -e "${dabsactivedirpath}" ]] || {
         logdebug "file not found: ${dabsactivedirpath}"
         return $EX_NO
     }
-    local dabsitem_symlink=$(readlink -n "${dabsactivedirpath}")
+    local dabsitem_symlink
+    dabsitem_symlink=$(readlink -n "${dabsactivedirpath}")
     [[ "$?" -eq "${EX_OK}" ]] || {
         logwarn "couldn't readlink, assuming bad database item:"\
             "${dabsactivedirpath}"
         return $EX_NO
     }
-    local dateidentifier="$(basename "${dabsitem_symlink}")"
+    local dateidentifier
+    dateidentifier="$(basename "${dabsitem_symlink}")"
     [[ "$?" -eq "${EX_OK}" ]] || {
         logwarn "could not call 'basename', assuming bad database item:"\
             "${dabsitem_symlink}"
@@ -398,7 +401,8 @@ function DateIdentifier()
 ##
 UniqueIdentifier_counter="${UniqueIdentifier_counter:-0}"
 function UniqueIdentifier() {
-    local str="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
+    local str
+    str="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
     [[ "$?" -ne "${EX_OK}" ]] && {
         logerror "could not call 'date'"
         return $EX_OSFILE
@@ -423,7 +427,8 @@ function UniqueIdentifier() {
 ##
 function SpoolIdentifier() {
     local name="$(echo "DNS:${@}" | sed -re 's/ /,DNS:/g')"
-    local sha1="$(sha1sum <<<"$name" | cut -d " " -f1)"
+    local sha1
+    sha1="$(sha1sum <<<"$name" | cut -d " " -f1)"
     [[ "$?" -ne "${EX_OK}" ]] && {
         logerror "could not call 'sha1sum'"
         return $EX_OSFILE
@@ -523,14 +528,16 @@ function FsckDabsItem() {
     ## verify that certificate matches private key
     ## if produces more than 1 line, fingerprints mismatch and thus
     ## public key parts are different
-    local keydigest="$(set -o pipefail;
+    local keydigest
+    keydigest="$(set -o pipefail;
         openssl rsa  -noout -modulus -in "${dabskeyfilepath}" \
         | openssl sha256)"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call 'openssl'"
         return $EX_OSERR
     }
-    local crtdigest="$(set -o pipefail;
+    local crtdigest
+    crtdigest="$(set -o pipefail;
         openssl x509 -noout -modulus -in "${dabscrtfilepath}" \
         | openssl sha256)"
     [[ "$?" -eq "$EX_OK" ]] || {
@@ -539,7 +546,8 @@ function FsckDabsItem() {
     }
 
     ## Note: can only do this, because the sha256 digest doesn't contain \
-    local cnt="$(set -o pipefail; \
+    local cnt
+    cnt="$(set -o pipefail; \
         echo -e "${keydigest}\n${crtdigest}" \
         | uniq \
         | wc -l)"
@@ -979,12 +987,14 @@ function new_item() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
     }
-    local spoolitemdirpath="${spooldir}/${identifier}"
+    local spoolitemdirpath
+    spoolitemdirpath="${spooldir}/${identifier}"
     [[ ! -e "${spoolitemdirpath}" ]] || {
         logerror "spool item already exists: ${spoolitemdirpath}"
         return $EX_USAGE
@@ -1018,7 +1028,8 @@ function item_new_key() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
@@ -1050,7 +1061,8 @@ function item_new_csr() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
@@ -1132,7 +1144,8 @@ function item_self_sign() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
@@ -1197,7 +1210,8 @@ function item_submit_csr_to_letsencrypt() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
@@ -1290,7 +1304,8 @@ function item_chain_retrieve() {
         return $EX_USAGE
     }
 
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'SpoolIdentifier'"
         return $EX_SOFTWARE
@@ -1426,7 +1441,8 @@ function item_activate() {
     ##
 
     local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
-    local dateidentifier="$(DateIdentifier "${FQDNS[@]}")"
+    local dateidentifier
+    dateidentifier="$(DateIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'DateIdentifier'"
         return $EX_SOFTWARE
@@ -1511,7 +1527,8 @@ function item_fail() {
     }
 
     local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
-    local dateidentifier="$(DateIdentifier "${FQDNS[@]}")"
+    local dateidentifier
+    dateidentifier="$(DateIdentifier "${FQDNS[@]}")"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call procedure 'DateIdentifier'"
         return $EX_SOFTWARE
@@ -1596,7 +1613,8 @@ function automatic_letsencrypt() {
         # and is not expired / will expiry soon
         local havegooddabs=1
 
-        local dateidentifier="$(ResolveToDateIdentifier "${identifier}")"
+        local dateidentifier
+        dateidentifier="$(ResolveToDateIdentifier "${identifier}")"
         case "$?" in
             "$EX_OK") ;; # could resolve, result was stored in $dabsitemdirpath
             "$EX_NO") # could not resolve, cause new spool item to be created
