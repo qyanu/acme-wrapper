@@ -8,7 +8,7 @@ Homepage: http://qyanu.net/software/acme-wrapper
 
 Package: acme-wrapper
 Architecture: all
-Depends: ${shlibs:Depends}, ${misc:Depends}, curl, openssl, adduser, python
+Depends: ${shlibs:Depends}, ${misc:Depends}, curl, openssl, adduser, python3
 Description: wrapper for acme-tiny for administration of SSL certificates
  acme-wrapper is a program designed to reliably and automatically administer
  SSL certificates using the ACME protocol (as used by Let's Encrypt).
