@@ -1,3 +1,9 @@
+acme-wrapper (0.4~rc3-1) unstable; urgency=medium
+
+  * Use Python 3.
+
+ -- Christian M. Amsüss <chrysn@fsfe.org>  Thu, 30 Jan 2020 15:21:00 +0100
+
 acme-wrapper (0.4~rc3) unstable; urgency=medium
 
   * Initial packaging.
