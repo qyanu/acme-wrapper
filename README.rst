@@ -3,13 +3,13 @@ acme-wrapper
 
 A program wrapping acme-tiny to make administrating ssl certificates to debian servers reliable and automatically.
 
-see http://qyanu.net/software/acme-wrapper
+See http://qyanu.net/software/acme-wrapper
 
 The package includes and re-distributes a copy of the software ``acme-tiny``.
 
-see ``https://github.com/diafygi/acme-tiny``
+See https://github.com/diafygi/acme-tiny
 
-Tested with and designed for debian 8 "jessie". Contributions to expand compatibility to other OS are welcome.
+Tested with and designed for debian 10 "buster". Contributions to expand compatibility to other OS are welcome.
 
 
 Installation
@@ -29,6 +29,6 @@ To install, using the included ``Makefile`` is recommended:
 Authors
 -------
 
-acme-wrapper was written by Max-Julian Pogner <max-julian@qyanu.net>
+acme-wrapper was written by Max-Julian Pogner <max-julian@pogner.at>
 
 acme-tiny.py was written by Daniel Roesler <diafygi@gmail.com>
