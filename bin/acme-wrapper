@@ -1105,6 +1105,8 @@ EOF
         local csr_cn="${FQDNS[0]}"
         local csr_san="$(echo "DNS:${FQDNS[@]}" | sed -re 's/ /,DNS:/g')"
         # set first domain as CN for compatibility
+        # set all domains as SAN for compliance
+        #    -addext "subjectAltName = ${csr_san}" \
         openssl req -text \
             -new -sha256 \
             -out "${spoolcsrfilepath}" \
