@@ -1506,7 +1506,7 @@ function item_activate() {
 
     # set the fqdn symlinks to the activated item
     # TODO: this is not rolled back
-    local linktarget="${linkname}"
+    local linktarget="../active/${identifier}"
     for fqdn in "${FQDNS[@]}"; do
         local linkname="${databasedir}/latest-by-fqdn/${fqdn}"
         ln -snf -T "${linktarget}" "${linkname}"
