@@ -36,3 +36,11 @@
 /var/opt/<package>/database/latest-by-fqdn/<fqdn>
     symlink to the identifier containing the most recently issued certificate with a certificate for fqdn.
     the symlink must be relative.
+
+/var/opt/<package>/database/latest-letsencrypt-by-fqdn/<fqdn>
+    symlink to the identifier containing the most recently issued let's encrypt certificate with a certificate for fqdn.
+    the symlink must be relative.
+
+/var/opt/<package>/database/latest-selfsigned-by-fqdn/<fqdn>
+    symlink to the identifier containing the most recently issued self-signed certificate with a certificate for fqdn.
+    the symlink must be relative.

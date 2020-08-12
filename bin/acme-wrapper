@@ -1503,14 +1503,63 @@ function item_activate() {
 
     ## remove spool item
     rm -Rf "${spoolitemdirpath}"
+    [[ "$?" -eq "$EX_OK" ]] || {
+        logerror "could not call 'rm', database may be inconsistent!"
+        return $EX_SOFTWARE
+    }
+
+    # is let's encrypt?
+    local isletsencrypt="0"
+    local isletsencrypt_file="${dabsitemdirpath}/isletsencrypt.bool"
+    [[ -r "$" ]] && {
+        isletsencrypt="$(<"$isletsencrypt_file")"
+    }
+    # is self-signed?
+    local isselfsign="0"
+    local isselfsign_file="${dabsitemdirpath}/isselfsign.bool"
+    [[ -r "$" ]] && {
+        isselfsign="$(<"$isselfsign_file")"
+    }
 
     # set the fqdn symlinks to the activated item
-    # TODO: this is not rolled back
     local linktarget="../active/${identifier}"
     for fqdn in "${FQDNS[@]}"; do
         local linkname="${databasedir}/latest-by-fqdn/${fqdn}"
+        mkdir -p "$(dirname "$linkname")"
         ln -snf -T "${linktarget}" "${linkname}"
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call 'ln', database may be inconsistent!"
+            return $EX_SOFTWARE
+        }
     done
+
+    # set the letsencrypt-fqdn symlinks to the activated item
+    if [[ "$isletsencrypt" ]]; then
+        local linktarget="../active/${identifier}"
+        for fqdn in "${FQDNS[@]}"; do
+            local linkname="${databasedir}/latest-letsencrypt-by-fqdn/${fqdn}"
+            mkdir -p "$(dirname "$linkname")"
+            ln -snf -T "${linktarget}" "${linkname}"
+            [[ "$?" -eq "$EX_OK" ]] || {
+                logerror "could not call 'ln', database may be inconsistent!"
+                return $EX_SOFTWARE
+            }
+        done
+    fi
+
+    # set the selfsigned-fqdn symlinks to the activated item
+    if [[ "$isselfsigned" ]]; then
+        local linktarget="../active/${identifier}"
+        for fqdn in "${FQDNS[@]}"; do
+            local linkname="${databasedir}/latest-selfsigned-by-fqdn/${fqdn}"
+            mkdir -p "$(dirname "$linkname")"
+            ln -snf -T "${linktarget}" "${linkname}"
+            [[ "$?" -eq "$EX_OK" ]] || {
+                logerror "could not call 'ln', database may be inconsistent!"
+                return $EX_SOFTWARE
+            }
+        done
+    fi
 
     return $EX_OK
 }
