@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PACKAGE := acme-wrapper
 VERSION := $(shell cat $(CURDIR)/VERSION)
-CURRENT_COMMIT_DATE := $(shell git show --format="%cI" --no-patch HEAD)
+CURRENT_COMMIT_DATE = $(shell git show --format="%cI" --no-patch HEAD)
 
 all:
 	@echo "done"
