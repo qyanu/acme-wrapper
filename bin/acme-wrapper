@@ -48,6 +48,7 @@ umask 077
 ##    - item_activate
 ##    - item_fail
 ##    - automatic_letsencrypt
+##    - automatic_selfsign
 ## - main
 ##
 
@@ -261,7 +262,7 @@ function echoerr() {
 ## or $EX_NO otherwise.
 ##
 ## if there are zero haystack-strings (the empty set), $EX_NO is returned.
-## if there also needle is missing the result is undefined.
+## if also needle is missing, the result is undefined.
 ##
 ## Synopsis:
 ##     StringEqualToAnyOf NEEDLE [HAYSTACKELEMENT1] [HAYSTACKELEMENT2] ...
@@ -326,47 +327,6 @@ function logdebug() {
 
 
 ##
-## resolves the given identifier to the currently active date_identifier
-## in the database.
-##
-## parameter: identifier
-## stdout: date_identifier
-## return: EX_OK if could be resolved, EX_NO if not.
-##
-function ResolveToDateIdentifier()
-{
-    [[ "$#" -eq 1 ]] || {
-        logerror "need exactly one argument"
-        return $EX_MISUSE_OF_BUILTIN
-    }
-    local identifier="$1"
-    local dabsactivedirpath
-    dabsactivedirpath="${databasedir}/active/${identifier}"
-    [[ -e "${dabsactivedirpath}" ]] || {
-        logdebug "file not found: ${dabsactivedirpath}"
-        return $EX_NO
-    }
-    local dabsitem_symlink
-    dabsitem_symlink=$(readlink -n "${dabsactivedirpath}")
-    [[ "$?" -eq "${EX_OK}" ]] || {
-        logwarn "couldn't readlink, assuming bad database item:"\
-            "${dabsactivedirpath}"
-        return $EX_NO
-    }
-    local dateidentifier
-    dateidentifier="$(basename "${dabsitem_symlink}")"
-    [[ "$?" -eq "${EX_OK}" ]] || {
-        logwarn "could not call 'basename', assuming bad database item:"\
-            "${dabsitem_symlink}"
-        return $EX_NO
-    }
-    logdebug "resolved ${identifier} => ${dateidentifier}"
-    echo -n "${dateidentifier}"
-    return $EX_OK
-}
-
-
-##
 ## return a new date_identifier
 ##
 ## parameters: FQDN [SANs]
@@ -380,7 +340,12 @@ function DateIdentifier()
         return $EX_MISUSE_OF_BUILTIN
     }
     local identifier="$(SpoolIdentifier "$@")"
-    local datestr="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
+    local datestr
+    datestr="$(date +%Y-%m-%d-%H-%M-%S)-${UniqueIdentifier_counter}-$$"
+    [[ "$?" -ne "${EX_OK}" ]] && {
+        logerror "could not call 'date'"
+        return $EX_OSFILE
+    }
     local dateidentifier="${datestr}-${identifier}"
     ((UniqueIdentifier_counter++))
     echo -n "${dateidentifier}"
@@ -416,8 +381,8 @@ function UniqueIdentifier() {
 ##
 ## prints to stdout a determenistic identifier usable for directory or file
 ## names.
-## equal parameters result in equal identifiert.
-## unequal parameters most certainly result in unequal identfiers.
+## equal parameters result in equal identifiers.
+## unequal parameters most probably result in unequal identfiers.
 ##
 ## implementation detail: currently a UUID Version 5 with unspecified namespace
 ## is created.
@@ -477,7 +442,7 @@ function FsckDabsItem() {
     local dateidentifier="$1"
     local dabsitemdirpath="${databasedir}/items/${dateidentifier}"
 
-    logdebug "COMMAND: ${dabsitemdirpath}"
+    logdebug "FsckDabsItem: ${dabsitemdirpath}"
 
     local dabskeyfilepath="${dabsitemdirpath}/key.pem"
     local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
@@ -525,8 +490,8 @@ function FsckDabsItem() {
         return $EX_NO
     }
 
-    ## verify that certificate matches private key
-    ## if produces more than 1 line, fingerprints mismatch and thus
+    ## verify that certificate matches private key:
+    ## if command produces more than 1 line, fingerprints mismatch and thus
     ## public key parts are different
     local keydigest
     keydigest="$(set -o pipefail;
@@ -545,7 +510,7 @@ function FsckDabsItem() {
         return $EX_OSERR
     }
 
-    ## Note: can only do this, because the sha256 digest doesn't contain \
+    ## Note: can only do this, because the sha256 digest never contains '\'
     local cnt
     cnt="$(set -o pipefail; \
         echo -e "${keydigest}\n${crtdigest}" \
@@ -562,18 +527,19 @@ function FsckDabsItem() {
 
 
     ## verify that the certificate chain validates
-    if [[ -e "${dabsisselfsign}" ]]; then
-        openssl verify -verbose \
-            -CAfile "${dabscafilepath}" \
-            "${dabscrtfilepath}" \
-            >/dev/null
-    else
-        openssl verify -verbose \
-            -CAfile "${dabscafilepath}" \
-            -untrusted "${dabschainfilepath}" \
-            "${dabscrtfilepath}" \
-            >/dev/null
-    fi
+    ## note: this also checks the expiry date of the certificate
+    ## against the current system time
+    local chainopts=("-untrusted" "${dabschainfilepath}")
+    [[ -s "${dabschainfilepath}" ]] || {
+        logging "skipping chain.pem file parameter of 'openssl verify'"
+        chainopts=( )
+    }
+    logdebug "calling 'openssl verify'"
+    openssl verify -verbose \
+        -CAfile "${dabscafilepath}" \
+        "${chainopts[@]}" \
+        "${dabscrtfilepath}" \
+        >/dev/null
     [[ "$?" -eq 0 ]] || {
         logdebug "does not verify against ${dabscafilepath} +" \
             "${dabschainfilepath}: ${dabscrtfilepath}"
@@ -584,6 +550,44 @@ function FsckDabsItem() {
     return $EX_OK
 }
 
+
+
+##
+## check if the given database item should be renewed
+## parameters: date_identifier of database item
+## return: EX_OK if everything seems in order, EX_NO if the DabsItem should be
+##   renewed
+##
+function ShouldRenewDabsItem() {
+
+    local dateidentifier="$1"
+    local dabsitemdirpath="${databasedir}/items/${dateidentifier}"
+
+    FsckDabsItem "${dateidentifier}"
+    case "$?" in
+        $EX_OK) ;; # ok, go on
+        $EX_NO)
+            loginfo "FSCK-FAIL for ${dateidentifier}"
+            return "$EX_NO"
+        ;;
+        *)
+            logerror "could not call procedure 'FsckDabsItem' on database"\
+                "item: ${dateidentifier}"
+            return $EX_SOFTWARE
+        ;;
+    esac
+
+    # check if the, otherwise good, database item will soon expiry
+    local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
+    openssl x509 -checkend "${RESUBMIT_BEFORE}" \
+        -in "${dabscrtfilepath}" \
+        >/dev/null 2>/dev/null
+    [[ "$?" -eq "$EX_OK" ]] || {
+        loginfo "EXPIRED ${dateidentifier}"
+    }
+
+    logdebug "needs no renew: ${dateidentifier}"
+}
 
 
 ###############################################################################
@@ -597,7 +601,7 @@ function FsckDabsItem() {
 ##
 function printhelp() {
     echo "NAME"
-    echo "    acme-wrapper -- automatic ssl-certificate updater and database"
+    echo "    acme-wrapper -- automatic ssl-certificate retriever and database"
     echo ""
     echo "SYNOPSIS"
     echo "    ${MYNAME} [OPTIONS] [COMMAND] [--all-XXXX | FQDN [SANs]]"
@@ -658,7 +662,7 @@ function printhelp() {
     echo "      letsencrypt account"
     echo ""
     echo "  --new-item  creates a new spool item for the given FQDN+SANS."
-    echo "      Each FQDNS+SANs may at most have one uncommited item."
+    echo "      Each FQDNS+SANs may at most have one spool item at a given time."
     echo ""
     echo "  --item-new-key  create a new rsa keypair in the spool item"
     echo "      for the FQDN+SANs combination."
@@ -699,39 +703,68 @@ function printhelp() {
     echo "      permanently marked as 'failed' and moved commited to the"
     echo "      database. By committing, the content of an item will not be"
     echo "      changed or amended."
-    echo "      No symlinks will be changed."
+    echo "      No symlinks will be changed, thus the comitted item will not"
+    echo "      be visible unless by explicit item-id."
     echo ""
     echo "  --automatic-letsencrypt  does sensible things to keep a"
-    echo "      non-expired certificate ready in the database."
+    echo "      non-expired let's encrypt certificate ready in the database."
     echo "      Usually called from cron in combination with the"
     echo "      --all-domains option."
     echo "      Uses Letsencrypt Certification Authority to issue"
     echo "      certificates."
+    echo ""
     echo "      In summary, what the command does is:"
+    echo "      - check for all specified FQDN+SANs:"
+    echo "        - whether the letsencrypt-item currently active for this"
+    echo "          FQDN/SAN has no apparent errors and will not expire for"
+    echo "          some time (configuration 'RESUBMIT_BEFORE')."
+    echo "      - if all FQDNs/SANs are ok end processing successfully,"
+    echo "        else continue."
     echo "      - create account key if not yet created"
-    echo "      - for each FQDN+SANs (in case of '--all', for each line in "
-    echo "        etc/domains.list):"
-    echo "        - if no spool item exists for this FQDN+SANs:"
-    echo "          - if the currently active item has no apparent errors"
-    echo "            and will not expire for some time (configuration"
-    echo "            RESUBMIT_BEFORE), leave this FQDN+SANs allone,"
-    echo "            successfully."
-    echo "          - else, create a new spool item and continue"
-    echo "        - inspect the spool item and execute the missing commands"
-    echo "          in order:"
-    echo "          - item-new-key"
-    echo "          - item-new-csr"
-    echo "          - item-submit-csr-to-letsencrypt"
-    echo "          - item-chain-retrieve"
-    echo "        - if everything went successful, execute item-active"
-    echo "        - else if an unrecoverable error occured (i.e. the item is"
-    echo "          believed to be damaged), execute item-fail"
+    echo "      - if no spool item exists for this FQDN+SANs create a new spool"
+    echo "        item."
+    echo "      - inspect the spool item and execute the missing commands in"
+    echo "        order:"
+    echo "        - item-new-key"
+    echo "        - item-new-csr"
+    echo "        - item-submit-csr-to-letsencrypt"
+    echo "        - item-chain-retrieve"
+    echo "      - if everything went successful, execute 'item-activate'"
+    echo "      - else if an unrecoverable error occured (i.e. the item is"
+    echo "        believed to be damaged or is incompatible with letsencrypt),"
+    echo "        execute 'item-fail'."
+    echo ""
+    echo "  --automatic-selfsign  does sensible things to keep a"
+    echo "      non-expired self-signed certificate ready in the database."
+    echo "      Usually called from cron in combination with the"
+    echo "      --all-domains option."
+    echo ""
+    echo "      In summary, what the command does is:"
+    echo "      - check for all specified FQDN+SANs (in case of '--all', for"
+    echo "        each line in etc/domains.list):"
+    echo "        - if the selfsigned-item currently active for this FQDN/SAN"
+    echo "          has no apparent errors and will not expire for some time"
+    echo "          (configuration RESUBMIT_BEFORE)."
+    echo "      - if all FQDNs/SANs are ok end processing successfully,"
+    echo "        else continue."
+    echo "      - if no spool item exists for this FQDN+SANs create a new spool"
+    echo "        item."
+    echo "      - inspect the spool item and execute the missing commands"
+    echo "        in order:"
+    echo "        - item-new-key"
+    echo "        - item-new-csr"
+    echo "        - item-self-sign"
+    echo "        - item-chain-retrieve"
+    echo "      - if everything went successful, execute 'item-activate'"
+    echo "      - else if an unrecoverable error occured (i.e. the item is"
+    echo "        believed to be damaged or is incompatible with selfsign),"
+    echo "        execute 'item-fail'."
     echo ""
     echo ""
     echo "FQDN and SANs:"
     echo ""
-    echo "  if no --all option is specified, the first non-option parameter"
-    echo "is the fully qualified domain name of the certificate to be"
+    echo "  if no --all-XXXX option is specified, the first non-option"
+    echo "parameter is the fully qualified domain name of the certificate to be"
     echo "processed by the command. all other non-option parameters are"
     echo "additional fqdns for the same certificate, used as subject"
     echo "alternative name(s)."
@@ -744,15 +777,15 @@ function printhelp() {
     echo ""
     echo "SECURITY CONSIDERATIONS:"
     echo ""
-    echo "  The program 'acme-tiny.py' was just downloaded from GitHub"
-    echo "without audit. No cryptographic signature was checked, because"
-    echo "none was provided."
+    echo "  The program \`acme-tiny.py\` was just downloaded from GitHub"
+    echo "without audit. No cryptographic signature was checked (and"
+    echo "none was provided)."
     echo ""
-    echo "  The program 'openssl' is unconditionally and fully"
+    echo "  The system's \`openssl\` command is unconditionally and fully"
     echo "trusted."
     echo ""
     echo "  Until appropriate changes are made in this script, the config"
-    echo "file is included via the 'source' bash builtin command, and thus"
+    echo "file is included via the \`source\` bash builtin command, and thus"
     echo "must also be subject to the same security measures as this"
     echo "script itself."
     echo ""
@@ -766,7 +799,7 @@ function printhelp() {
 ############################# COMMAND PROCEDURES ##############################
 ###############################################################################
 
-## 
+##
 ## parse the given parameters as commandline
 ##
 ## parameters: the command line
@@ -796,7 +829,7 @@ function parse_cmdline() {
                 arg="$2"
                 shift
                 StringEqualToAnyOf "$arg" "${LOG_LEVEL_ENUM_ALL[@]}"
-                case "$?" in 
+                case "$?" in
                     $EX_OK)
                         LOG_LEVEL="$arg"
                         ;;
@@ -863,6 +896,10 @@ function parse_cmdline() {
             --automatic_letsencrypt)
                 CMDS+=("automatic_letsencrypt")
                 ;;
+            --automatic-selfsign|\
+            --automatic_selfsign)
+                CMDS+=("automatic_selfsign")
+                ;;
 
             ## selection of FQDNS ##
             --all-domains)
@@ -887,7 +924,7 @@ function parse_cmdline() {
         esac
         shift
     done
- 
+
     # if no commands given, display help
     [[ "${#CMDS[@]}" -eq 0 ]] && {
         printhelp
@@ -959,7 +996,7 @@ function new_letsencrypt_account() {
         -out "${keyfile}" -outform "PEM" -text 2>/dev/null
     [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
-    openssl rsa -in "${keyfile}" -check -noout 
+    openssl rsa -in "${keyfile}" -check -noout
     [[ "$?" -ne "${EX_OK}" ]] && commit=0;
 
     openssl rsa -in "${keyfile}" -pubout -text > "${pubfile}"
@@ -1280,7 +1317,11 @@ function item_submit_csr_to_letsencrypt() {
         logerror "could not call 'cat'"
         return $EX_OSERR
     }
-    openssl x509 -in "${TEMPFILEPATH}" -text > "${spoolcrtfilepath}"
+    openssl x509 \
+        -in "${TEMPFILEPATH}" \
+        -purpose \
+        -text \
+        > "${spoolcrtfilepath}"
     [[ "$?" -eq "$EX_OK" ]] || {
         logerror "could not call 'openssl'"
         return $EX_UNAVAILABLE
@@ -1313,7 +1354,7 @@ function item_chain_retrieve() {
         return $EX_SOFTWARE
     }
 
-    logdebug "COMMAND for ${FQDNS[@]} (${identifier})"
+    loginfo "COMMAND for ${FQDNS[@]} (${identifier})"
 
     local spoolitemdirpath="${spooldir}/${identifier}"
     local spoolkeyfilepath="${spoolitemdirpath}/key.pem"
@@ -1331,6 +1372,7 @@ function item_chain_retrieve() {
     # cleanup just in case because we use pattern later
     rm -f "${spoolitemdirpath}/chain_"*".pem"
 
+    logdebug "inspecting ${spoolcrtfilepath}"
     cat "${spoolcrtfilepath}" > "${TEMPFILEPATH}"
     local chaincount=0
     while true; do
@@ -1342,6 +1384,7 @@ function item_chain_retrieve() {
 
         # check if no issuer certificate => we have reached root
         [[ "${issuer_uri}" = "" ]] && {
+            logdebug "inspected crt is root-crt"
             # store in ca.pem
             cat "${TEMPFILEPATH}" > "${spoolcafilepath}"
             # and end the loop
@@ -1357,6 +1400,7 @@ function item_chain_retrieve() {
         ((chaincount++))
 
         # retrieve issuer cert
+        logdebug "issuer of crt is: ${issuer_uri} at #${chaincount}"
         curl -s "${issuer_uri}" > "${TEMPFILEPATH}"
 
         [[ "$?" -eq "$EX_OK" ]] || {
@@ -1491,15 +1535,58 @@ function item_activate() {
         ;;
     esac
 
-    ## activation
-    local linktarget="../items/${dateidentifier}"
-    local linkname="${databasedir}/active/${identifier}"
-    # do activation with one atomic operation
-    ln -snf -T "${linktarget}" "${linkname}"
-    [[ "$?" -eq "$EX_OK" ]] || {
-        logerror "could not call 'ln', database may be inconsistent!"
-        return $EX_SOFTWARE
+    # is let's encrypt?
+    local isletsencrypt="0"
+    local isletsencrypt_file="${dabsitemdirpath}/isletsencrypt.bool"
+    [[ -r "$isletsencrypt_file" ]] && {
+        isletsencrypt="$(<"$isletsencrypt_file")"
     }
+    # is self-signed?
+    local isselfsign="0"
+    local isselfsign_file="${dabsitemdirpath}/isselfsign.bool"
+    [[ -r "$isselfsign_file" ]] && {
+        isselfsign="$(<"$isselfsign_file")"
+    }
+
+    # set the fqdn symlinks to the activated item
+    local linktarget="../items/${dateidentifier}"
+    for fqdn in "${FQDNS[@]}"; do
+        local linkname="${databasedir}/latest-by-fqdn/${fqdn}"
+        ln -snf -T "${linktarget}" "${linkname}"
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call 'ln', database may be inconsistent!"
+            rm -Rf "${dabsitemdirpath}"
+            return $EX_SOFTWARE
+        }
+    done
+
+    # set the letsencrypt-fqdn symlinks to the activated item
+    if [[ "$isletsencrypt" ]]; then
+        local linktarget="../items/${dateidentifier}"
+        for fqdn in "${FQDNS[@]}"; do
+            local linkname="${databasedir}/latest-letsencrypt-by-fqdn/${fqdn}"
+            ln -snf -T "${linktarget}" "${linkname}"
+            [[ "$?" -eq "$EX_OK" ]] || {
+                logerror "could not call 'ln', database may be inconsistent!"
+                rm -Rf "${dabsitemdirpath}"
+                return $EX_SOFTWARE
+            }
+        done
+    fi
+
+    # set the selfsigned-fqdn symlinks to the activated item
+    if [[ "$isselfsign" ]]; then
+        local linktarget="../items/${dateidentifier}"
+        for fqdn in "${FQDNS[@]}"; do
+            local linkname="${databasedir}/latest-selfsign-by-fqdn/${fqdn}"
+            ln -snf -T "${linktarget}" "${linkname}"
+            [[ "$?" -eq "$EX_OK" ]] || {
+                logerror "could not call 'ln', database may be inconsistent!"
+                rm -Rf "${dabsitemdirpath}"
+                return $EX_SOFTWARE
+            }
+        done
+    fi
 
     ## remove spool item
     rm -Rf "${spoolitemdirpath}"
@@ -1507,59 +1594,6 @@ function item_activate() {
         logerror "could not call 'rm', database may be inconsistent!"
         return $EX_SOFTWARE
     }
-
-    # is let's encrypt?
-    local isletsencrypt="0"
-    local isletsencrypt_file="${dabsitemdirpath}/isletsencrypt.bool"
-    [[ -r "$" ]] && {
-        isletsencrypt="$(<"$isletsencrypt_file")"
-    }
-    # is self-signed?
-    local isselfsign="0"
-    local isselfsign_file="${dabsitemdirpath}/isselfsign.bool"
-    [[ -r "$" ]] && {
-        isselfsign="$(<"$isselfsign_file")"
-    }
-
-    # set the fqdn symlinks to the activated item
-    local linktarget="../active/${identifier}"
-    for fqdn in "${FQDNS[@]}"; do
-        local linkname="${databasedir}/latest-by-fqdn/${fqdn}"
-        mkdir -p "$(dirname "$linkname")"
-        ln -snf -T "${linktarget}" "${linkname}"
-        [[ "$?" -eq "$EX_OK" ]] || {
-            logerror "could not call 'ln', database may be inconsistent!"
-            return $EX_SOFTWARE
-        }
-    done
-
-    # set the letsencrypt-fqdn symlinks to the activated item
-    if [[ "$isletsencrypt" ]]; then
-        local linktarget="../active/${identifier}"
-        for fqdn in "${FQDNS[@]}"; do
-            local linkname="${databasedir}/latest-letsencrypt-by-fqdn/${fqdn}"
-            mkdir -p "$(dirname "$linkname")"
-            ln -snf -T "${linktarget}" "${linkname}"
-            [[ "$?" -eq "$EX_OK" ]] || {
-                logerror "could not call 'ln', database may be inconsistent!"
-                return $EX_SOFTWARE
-            }
-        done
-    fi
-
-    # set the selfsigned-fqdn symlinks to the activated item
-    if [[ "$isselfsigned" ]]; then
-        local linktarget="../active/${identifier}"
-        for fqdn in "${FQDNS[@]}"; do
-            local linkname="${databasedir}/latest-selfsigned-by-fqdn/${fqdn}"
-            mkdir -p "$(dirname "$linkname")"
-            ln -snf -T "${linktarget}" "${linkname}"
-            [[ "$?" -eq "$EX_OK" ]] || {
-                logerror "could not call 'ln', database may be inconsistent!"
-                return $EX_SOFTWARE
-            }
-        done
-    fi
 
     return $EX_OK
 }
@@ -1634,7 +1668,101 @@ function automatic_letsencrypt() {
     }
 
 
-    ## 1. create account key if missing
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+
+    logdebug "CHECK '${FQDNS[@]}' (${identifier})"
+
+
+    ## 1. determine if renew for this FQDN+SANs is needed
+
+    # holds the result, whether a database item for all FQDN+SANs exists, are
+    # without error(s), are not expired and will not expire soon.
+    local havegooddabs=1
+
+    for fqdn in "${FQDNS[@]}"; do
+        local linkname
+        linkname="${databasedir}/latest-by-fqdn/${fqdn}"
+        logdebug "inspecting ${fqdn} at ${linkname}"
+
+        local linktarget
+        ((havegooddabs==1)) && {
+            linktarget=$(readlink -n "${linkname}")
+            if [[ "$?" -eq "${EX_OK}" ]]; then
+                logdebug "found ${fqdn} pointing to ${linktarget}"
+            else
+                loginfo "couldn't readlink no certificate for ${fqdn} exists yet"
+                havegooddabs=0
+            fi
+        }
+
+        ((havegooddabs==1)) && {
+            local dateidentifier
+            dateidentifier="$(basename "${linktarget}")"
+            if [[ "$?" -eq "${EX_OK}" ]]; then
+                logdebug "resolved ${fqdn} => ${dateidentifier}"
+                ShouldRenewDabsItem "${dateidentifier}"
+                case "$?" in
+                    $EX_OK) ;; # ok, go on
+                    $EX_NO)
+                        loginfo "UNCLEAN ${fqdn} (\"${dateidentifier}\")"
+                        havegooddabs=0
+                    ;;
+                    *)
+                        logerror "could not call procedure 'ShouldRenewDabsItem' on database"\
+                            "item: ${dateidentifier}"
+                        return $EX_SOFTWARE
+                    ;;
+                esac
+            else
+                logwarn "could not call 'basename', assuming bad database item:"\
+                    "${linktarget}"
+                havegooddabs=0
+            fi
+
+
+            # check if the, otherwise good, database item is a self-signed
+            # certificate. if yes, still need to retrieve a let's encrypt
+            # certificate
+            ((havegooddabs==1)) && {
+                local dabsitemdirpath="${databasedir}/items/${dateidentifier}"
+                local dabsisselfsignfilepath="${dabsitemdirpath}/isselfsign.bool"
+                if [[ -e "${dabsisselfsignfilepath}" && "$(<"${dabsisselfsignfilepath}")" -ne 0  ]]; then
+                    loginfo "IS SELF SIGN: ${fqdn}/${dateidentifier}"
+                    havegooddabs=0
+                else
+                    logdebug "not self-signed: ${fqdn}/${dateidentifier}"
+                fi
+            }
+        }
+    done
+
+
+    ## 2a. if all database items for all checked fqdns are still good, then
+    ## return successfully
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    ((havegooddabs==1)) && {
+        logdebug "all good, nothing to do for: ${FQDNS[@]}"
+
+        # if a spool item exists for this identifier, then fail it
+        [[ -e "${spoolitemdirpath}" ]] && {
+            item_fail
+            local ex="$?"
+            [[ "$ex" -eq "$EX_OK" ]] || {
+                logerror "could not call procedure 'item_fail'"
+                return "$ex"
+            }
+        }
+
+        return $EX_OK
+    }
+
+
+    ## 2b. else, need to perform the steps to retrieve a new let's encrypt
+    ## certificate
+
+
+    ## 3. create account key if missing
     logdebug "CHECKING ACCOUNT KEY"
     [[ -f "${letsencryptaccountdir}/current/account_key.pem" ]] || {
         # create new account key
@@ -1646,97 +1774,15 @@ function automatic_letsencrypt() {
     }
     local accountkeyfilepath="${letsencryptaccountdir}/current/account_key.pem"
 
-
-    ## 2. determine if there is a spool item for this FQDN+SANs
-    ## if it is not, determine if certificate is expiring.
-    ## depening on the results, use the existing spool item, create a new one
-    ## or return with success.
-    local identifier="$(SpoolIdentifier "${FQDNS[@]}")"
-    logdebug "CHECK '${FQDNS[@]}' (${identifier})"
-
-    local spoolitemdirpath="${spooldir}/${identifier}"
-
-    # only look at the database if a spool item does not already exist
-    # check the database to either create a spool item, or determine
-    # that everything is OK and return from this procedure
+    ## 4. create spool item if not yet exists
     [[ -e "${spoolitemdirpath}" ]] || {
-        # holds the result, whether the database item exists, is without error
-        # and is not expired / will expiry soon
-        local havegooddabs=1
-
-        local dateidentifier
-        dateidentifier="$(ResolveToDateIdentifier "${identifier}")"
-        case "$?" in
-            "$EX_OK") ;; # could resolve, result was stored in $dabsitemdirpath
-            "$EX_NO") # could not resolve, cause new spool item to be created
-                havegooddabs=0
-                ;;
-            *) # should not happen
-                logerror "could not call procedure 'ResolveToDateIdentifier'"
-                return $EX_SOFTWARE
-        esac
-        local dabsitemdirpath="${databasedir}/items/${dateidentifier}"
-
-        # check if item exists and is directory
-        ((havegooddabs==1)) && {
-            [[ -d "${dabsitemdirpath}" ]] || {
-                loginfo "MISSING ${dabsitemdirpath}"
-                havegooddabs=0
-            }
+        new_item
+        [[ "$?" -ne "${EX_OK}" ]] && {
+            logerror "could not create spool item for '${FQDNS[@]}'"
+            return $EX_UNAVAILABLE
         }
-
-        # check fsck for any database item errors
-        ((havegooddabs==1)) && {
-            FsckDabsItem "${dateidentifier}"
-            case "$?" in
-                "$EX_OK") ;; # everything seems in order
-                "$EX_NO")    # some error was detected
-                    loginfo "UNCLEAN ${dabsitemdirpath} (\"${dateidentifier}\")"
-                    havegooddabs=0
-                    ;;
-                *) # should not happen
-                    logerror "could not call procedure 'FsckDabsItem'"
-                    return $EX_SOFTWARE
-            esac
-        }
-
-        # check if, the otherwise good database item, is expired
-        # or will soon expiry
-        ((havegooddabs==1)) && {
-            local dabscrtfilepath="${dabsitemdirpath}/crt.pem"
-            openssl x509 -checkend "${RESUBMIT_BEFORE}" \
-                -in "${dabscrtfilepath}" \
-                >/dev/null 2>/dev/null
-            [[ "$?" -eq "$EX_OK" ]] || {
-                loginfo "EXPIRED ${dabscrtfilepath}"
-                havegooddabs=0
-            }
-        }
-
-        # check if, the otherwise good database item, is a self-signed
-        # certificate
-        ((havegooddabs==1)) && {
-            local dabsisselfsignfilepath="${dabsitemdirpath}/isselfsign.bool"
-            [[ -e "${dabsisselfsignfilepath}" ]] && {
-                loginfo "IS SELF SIGN: ${dateidentifier}"
-                havegooddabs=0
-            }
-        }
-
-        # act upon the result. if the database item is not "good",
-        # initiate the procedure to acquire a replacement, otherwise
-        # return from this function successfully
-        if ((havegooddabs==1)); then
-            logdebug "GOOD ${dateidentifier}"
-            return $EX_OK
-        else
-            new_item
-            [[ "$?" -ne "${EX_OK}" ]] && {
-                logerror "could not create spool item for '${FQDNS[@]}'"
-                return $EX_UNAVAILABLE
-            }
-        fi
     }
+
     # if spool item does not exist at this point, this program has a bug
     [[ -d "${spoolitemdirpath}" ]] || {
         logerror "spool item directory does not exist:"\
@@ -1744,8 +1790,7 @@ function automatic_letsencrypt() {
         return $EX_SOFTWARE
     }
 
-
-    ## 3. check if key exists, else create it
+    ## 5. check if key exists, else create it
     [[ -e "${spoolitemdirpath}/key.pem" ]] || {
         # does not exist, create key
         item_new_key
@@ -1755,8 +1800,7 @@ function automatic_letsencrypt() {
         }
     }
 
-
-    ## 4. check if csr exists, else create it
+    ## 6. check if csr exists, else create it
     [[ -e "${spoolitemdirpath}/csr.pem" ]] || {
         # does not exist, create csr
         item_new_csr
@@ -1766,8 +1810,7 @@ function automatic_letsencrypt() {
         }
     }
 
-
-    ## 5. check if crt exists, else request if from letsencrypt
+    ## 7. check if crt exists, else request if from letsencrypt
     [[ -e "${spoolitemdirpath}/crt.pem" ]] || {
         # does not exist, retrieve crt
         item_submit_csr_to_letsencrypt
@@ -1777,8 +1820,7 @@ function automatic_letsencrypt() {
         }
     }
 
-
-    ## 6. ensure the chain is retrieved
+    ## 8. ensure the chain is retrieved
     [[ -e "${spoolitemdirpath}/chain.pem" ]] || {
         # does not exist, retrieve chain
         item_chain_retrieve
@@ -1789,24 +1831,219 @@ function automatic_letsencrypt() {
     }
 
 
-    ## 7. try to activate item
-    item_activate
-    [[ "$?" -eq "$EX_OK" ]] && {
-        logdebug "SUCCESS: ${FQDNS}"
-        return $EX_OK
+    ## 9. check if this really is a let's encrypt item, then activate else fail
+
+    # is let's encrypt?
+    local isletsencrypt="0"
+    local isletsencrypt_file="${spoolitemdirpath}/isletsencrypt.bool"
+    [[ -r "$isletsencrypt_file" ]] && {
+        isletsencrypt="$(<"$isletsencrypt_file")"
     }
 
-
-    ## 8. else fail the item
-    item_fail
-    [[ "$?" -eq "$EX_OK" ]] || {
-        logerror "could not call procedure 'item_fail'"
-        return $EX_UNAVAILABLE
-    }
+    ## 9a. try to activate item
+    if [[ "$isletsencrypt" -eq "1" ]]; then
+        item_activate
+        if [[ "$?" -eq "$EX_OK" ]]; then
+            logdebug "SUCCESS: ${FQDNS[@]}"
+            return $EX_OK
+        else
+            logdebug "FAIL: ${FQDNS[@]}"
+            item_fail
+            return $EX_FAIL
+        fi
+    ## 9b. fail non-self-signed item
+    else
+        item_fail
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call procedure 'item_fail'"
+            return $EX_UNAVAILABLE
+        }
+    fi
 
 
     return $EX_OK
 }
+
+
+##
+## see printhelp
+##
+function automatic_selfsign() {
+    [[ "${#FQDNS[@]}" -le 0 ]] && {
+        logerror "no domainnames given: ${#FQDNS[@]}"
+        return $EX_USAGE
+    }
+
+
+    local identifier
+    identifier="$(SpoolIdentifier "${FQDNS[@]}")"
+
+    logdebug "CHECK '${FQDNS[@]}' (${identifier})"
+
+
+    ## 1. determine if renew for this FQDN+SANs is needed
+
+    # holds the result, whether a database item for all FQDN+SANs exists, are
+    # without error(s), are not expired and will not expire soon.
+    local havegooddabs=1
+
+    for fqdn in "${FQDNS[@]}"; do
+        local linkname
+        linkname="${databasedir}/latest-selfsign-by-fqdn/${fqdn}"
+        logdebug "inspecting ${fqdn} at ${linkname}"
+
+        local linktarget
+        ((havegooddabs==1)) && {
+            linktarget=$(readlink -n "${linkname}")
+            if [[ "$?" -eq "${EX_OK}" ]]; then
+                logdebug "found ${fqdn} pointing to ${linktarget}"
+            else
+                loginfo "couldn't readlink no self-signed certificate for ${fqdn} exists yet"
+                havegooddabs=0
+            fi
+        }
+
+        ((havegooddabs==1)) && {
+            local dateidentifier
+            dateidentifier="$(basename "${linktarget}")"
+            if [[ "$?" -eq "${EX_OK}" ]]; then
+                logdebug "resolved ${fqdn} => ${dateidentifier}"
+                ShouldRenewDabsItem "${dateidentifier}"
+                case "$?" in
+                    $EX_OK) ;; # ok, go on
+                    $EX_NO)
+                        loginfo "UNCLEAN ${fqdn} (\"${dateidentifier}\")"
+                        havegooddabs=0
+                    ;;
+                    *)
+                        logerror "could not call procedure 'ShouldRenewDabsItem' on database"\
+                            "item: ${dateidentifier}"
+                        return $EX_SOFTWARE
+                    ;;
+                esac
+            else
+                logwarn "could not call 'basename', assuming bad database item:"\
+                    "${linktarget}"
+                havegooddabs=0
+            fi
+        }
+    done
+
+
+    ## 2a. if all database items for all checked fqdns are still good, then
+    ## return successfully
+    local spoolitemdirpath="${spooldir}/${identifier}"
+    ((havegooddabs==1)) && {
+        logdebug "all good, nothing to do for: ${FQDNS[@]}"
+
+        # if a spool item exists for this identifier, then fail it
+        [[ -e "${spoolitemdirpath}" ]] && {
+            item_fail
+            local ex="$?"
+            [[ "$ex" -eq "$EX_OK" ]] || {
+                logerror "could not call procedure 'item_fail'"
+                return "$ex"
+            }
+        }
+
+        return $EX_OK
+    }
+
+
+    ## 2b. else, need to performt the steps to retrieve a new let's encrypt
+    ## certificate
+
+
+    ## 3. create spool item if not yet exists
+    [[ -e "${spoolitemdirpath}" ]] || {
+        new_item
+        [[ "$?" -ne "${EX_OK}" ]] && {
+            logerror "could not create spool item for '${FQDNS[@]}'"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+    # if spool item does not exist at this point, this program has a bug
+    [[ -d "${spoolitemdirpath}" ]] || {
+        logerror "spool item directory does not exist:"\
+            "${spoolitemdirpath}"
+        return $EX_SOFTWARE
+    }
+
+
+    ## 4. check if key exists, else create it
+    [[ -e "${spoolitemdirpath}/key.pem" ]] || {
+        # does not exist, create key
+        item_new_key
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not create key: ${spoolitemdirpath}/key.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+    ## 5. check if csr exists, else create it
+    [[ -e "${spoolitemdirpath}/csr.pem" ]] || {
+        # does not exist, create csr
+        item_new_csr
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not create csr: ${spoolitemdirpath}/csr.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+    ## 6. check if crt exists, else create a self-signed
+    [[ -e "${spoolitemdirpath}/crt.pem" ]] || {
+        # does not exist, retrieve crt
+        item_self_sign
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not retrieve crt: ${spoolitemdirpath}/crt.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+    ## 7. ensure the chain is retrieved
+    [[ -e "${spoolitemdirpath}/chain.pem" ]] || {
+        # does not exist, retrieve chain
+        item_chain_retrieve
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not retrieve chain: ${spoolitemdirpath}/chain.pem"
+            return $EX_UNAVAILABLE
+        }
+    }
+
+    ## 8. check if this really is a self-signed item, then activate else fail
+
+    # is self-signed?
+    local isselfsign="0"
+    local isselfsign_file="${spoolitemdirpath}/isselfsign.bool"
+    [[ -r "$isselfsign_file" ]] && {
+        isselfsign="$(<"$isselfsign_file")"
+    }
+
+    ## 8a. try to activate item
+    if [[ "$isselfsign" -eq "1" ]]; then
+        item_activate
+        if [[ "$?" -eq "$EX_OK" ]]; then
+            logdebug "SUCCESS: ${FQDNS[@]}"
+            return $EX_OK
+        else
+            logdebug "FAIL: ${FQDNS[@]}"
+            item_fail
+            return $EX_FAIL
+        fi
+    ## 8b. fail non-self-signed item
+    else
+        item_fail
+        [[ "$?" -eq "$EX_OK" ]] || {
+            logerror "could not call procedure 'item_fail'"
+            return $EX_UNAVAILABLE
+        }
+    fi
+
+
+    return $EX_OK
+}
+
 
 
 
@@ -1862,6 +2099,6 @@ source "${CONFIG_FILEPATH}"
 
 ## parse commandline, if successful, call main
 ## this scripts exit code will be the exit code of either
-## parse_cmdline (if some error while parsing), or 
+## parse_cmdline (if some error while parsing), or
 ## of main (success or fail)
 parse_cmdline "$@" && main

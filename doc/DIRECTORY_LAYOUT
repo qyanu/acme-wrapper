@@ -1,3 +1,31 @@
+===========
+ PROVIDERS
+===========
+
+letsencrypt
+    certificates issued from let's encrypt
+
+selfsigned
+    self-signed certificates
+
+
+=============
+ IDENTIFIERS
+=============
+
+fqdn
+    the primary fully qualified name (e.g. "example.com") or subject alternative
+    name.
+
+fqdnsansidentifier
+    fqdnsansidentifier is deterministically calculated from the particular
+    FQDN+SANs and the provider.
+
+itemidentifier
+    the itemidentifier begins with the datetime when the item was committed,
+    and is followed by an arbitrary suffix in order to make clashes near
+    impossible.
+
 ==================
  DIRECTORY LAYOUT
 ==================
@@ -10,8 +38,9 @@
 /var/opt/<package>/letsencrypt-account/current
     symlink pointing to the currently active account
 
-/var/opt/<package>/spool/<identifier>/
-    idenifier is based on FQDN+SANs
+/var/opt/<package>/spool/<fqdnsansidentifier>/
+    the directory contains:
+
     file ``domain.list`` one line with the FQDN and SANs 
     file ``key.pem``
     file ``csr.pem``
@@ -24,23 +53,25 @@
     file ``isselfsign.bool`` contains "true" or "false". Default: "false"
     file ``isletsencrypt.bool`` contains "true" or "false". Default: "false"
 
-/var/opt/<package>/database/items/<date_identifier>/
-    the primary hold for all commited items
-    items are named with datetime of their commit, plus their identifier
-    calculated from FQDN+SANs.
+/var/opt/<package>/database/items/<itemidentifier>/
+    the primary hold for all committed items. once comitted, the item's
+    content must not change. see spool-item description to get a description
+    of the item contents.
 
-/var/opt/<package>/database/active/<identifier>
-    symlink to the currently active item for
-    that identifier. the symlink must be relative.
+/var/opt/<package>/database/active/<fqdnsansidentifier>
+    symlink to the currently active item for a combination of
+    FQDN+SANs+provider. the symlink must be relative.
 
 /var/opt/<package>/database/latest-by-fqdn/<fqdn>
-    symlink to the identifier containing the most recently issued certificate with a certificate for fqdn.
+    symlink to the most recently issued certificate for the particular fqdn/san.
     the symlink must be relative.
 
 /var/opt/<package>/database/latest-letsencrypt-by-fqdn/<fqdn>
-    symlink to the identifier containing the most recently issued let's encrypt certificate with a certificate for fqdn.
+    symlink to the most recently issued let's encrypt certificate for the
+    particular fqdn/san.
     the symlink must be relative.
 
 /var/opt/<package>/database/latest-selfsigned-by-fqdn/<fqdn>
-    symlink to the identifier containing the most recently issued self-signed certificate with a certificate for fqdn.
+    symlink to the most recently issued self-signed certificate for the
+    particular fqdn/san.
     the symlink must be relative.

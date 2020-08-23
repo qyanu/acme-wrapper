@@ -1,0 +1,7 @@
+ARG VERSION=latest
+FROM qyanu/acme-wrapper-test:$VERSION
+ARG TESTNAME
+ENTRYPOINT /entrypoint.sh
+COPY $TESTNAME.entrypoint.sh /entrypoint.sh
+RUN chown root:root /entrypoint.sh
+RUN chmod u+x /entrypoint.sh

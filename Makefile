@@ -49,3 +49,10 @@ acme-wrapper_$(VERSION).tar.bz2: clean
 		-cjf $(PACKAGE)_$(VERSION).tar.bz2 \
 		$(PACKAGE)_$(VERSION)/
 	rm -Rf $(CURDIR)/$(PACKAGE)_$(VERSION)
+
+.PHONY: test
+test: test/acme-wrapper.tar.bz2
+	VERSION=$(VERSION) $(MAKE) --warn-undefined-variables -C test test
+
+test/acme-wrapper.tar.bz2: acme-wrapper_$(VERSION).tar.bz2
+	cp $< $@
