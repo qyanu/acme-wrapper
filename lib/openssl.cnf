@@ -1,4 +1,4 @@
-RANDFILE = /dev/urandom
+RANDFILE = $ENV::HOME/.rnd
 
 [ req ]
 prompt = no
