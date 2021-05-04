@@ -1950,7 +1950,7 @@ function automatic_selfsign() {
     }
 
 
-    ## 2b. else, need to performt the steps to retrieve a new let's encrypt
+    ## 2b. else, need to perform the steps to create a new self-signed
     ## certificate
 
 
