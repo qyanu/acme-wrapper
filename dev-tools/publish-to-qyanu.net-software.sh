@@ -18,7 +18,7 @@ MYDIR="$(realpath "$(dirname "$0")")"
 # check validity of existing checksum
 (
     cd "$OPERATIONS_BASEDIR/source/_packages"
-    gpg2 --decrypt SHA256SUM.signed \
+    gpg --decrypt SHA256SUM.signed \
         | sha256sum --check
 )
 
@@ -38,7 +38,7 @@ install -o "$USER" -g "$GROUP" --mode=a=rX,u+w \
 (
     cd "$OPERATIONS_BASEDIR/source/_packages"
     sha256sum --binary acme-wrapper_* > SHA256SUM
-    gpg2 --clearsign --output SHA256SUM.signed SHA256SUM
+    gpg --clearsign --output SHA256SUM.signed SHA256SUM
     chown "${USER}:${GROUP}" SHA256SUM.signed SHA256SUM
     chmod a=rX,u+w SHA256SUM.signed SHA256SUM
 )
