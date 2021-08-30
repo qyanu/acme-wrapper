@@ -56,9 +56,9 @@ else
 fi
 
 # use empty domains.list if no list exists from before
-if [[ -e "/etc/opt/${PACKAGE}/domains.conf" ]]; then
+if [[ -e "/etc/opt/${PACKAGE}/domains.list" ]]; then
     echo "leaving existing domain list untouched"
-    echo "/etc/opt/${PACKAGE}/domains.conf"
+    echo "/etc/opt/${PACKAGE}/domains.list"
 else
     cp -p "/etc/opt/${PACKAGE}/domains.list-dist" \
           "/etc/opt/${PACKAGE}/domains.list"
