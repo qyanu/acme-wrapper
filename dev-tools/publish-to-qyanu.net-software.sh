@@ -38,7 +38,10 @@ install -o "$USER" -g "$GROUP" --mode=a=rX,u+w \
 (
     cd "$OPERATIONS_BASEDIR/source/_packages/${PACKAGE}/"
     rm -f SHA256SUM.signed SHA256SUM
-    sha256sum --binary ${PACKAGE}_* > SHA256SUM
+    find . \! -name 'SHA256SUM*' -type f -printf '%P\0' \
+        | sort -V -z \
+        | xargs -0 sha256sum --binary \
+        > SHA256SUM
     gpg --clearsign --output SHA256SUM.signed SHA256SUM
     chown "${USER}:${GROUP}" SHA256SUM.signed SHA256SUM
     chmod a=rX,u+w SHA256SUM.signed SHA256SUM
