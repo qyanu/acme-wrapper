@@ -1296,7 +1296,7 @@ function item_submit_csr_to_letsencrypt() {
     touch "${spoolcrtfilepath}" # Note: create file with correct umask
     prevumask="$(umask)"
     umask 022
-    python "${acme_tiny}" \
+    python3 "${acme_tiny}" \
         --account-key "${accountkeyfilepath}" \
         --csr "${spoolcsrfilepath}" \
         --acme-dir "${ACME_CHALLENGE_DIR}" \
