@@ -531,7 +531,7 @@ function FsckDabsItem() {
     ## against the current system time
     local chainopts=("-untrusted" "${dabschainfilepath}")
     [[ -s "${dabschainfilepath}" ]] || {
-        logging "skipping chain.pem file parameter of 'openssl verify'"
+        logdebug "skipping chain.pem file parameter of 'openssl verify'"
         chainopts=( )
     }
     logdebug "calling 'openssl verify'"
