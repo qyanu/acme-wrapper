@@ -584,9 +584,11 @@ function ShouldRenewDabsItem() {
         >/dev/null 2>/dev/null
     [[ "$?" -eq "$EX_OK" ]] || {
         loginfo "EXPIRED ${dateidentifier}"
+        return "$EX_NO"
     }
 
     logdebug "needs no renew: ${dateidentifier}"
+    return "$EX_OK"
 }
 
 
