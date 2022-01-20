@@ -45,8 +45,9 @@ import acme-tiny current master
 
     commands where:
 
-      curl $downloadurl \
-        | tar -zx --overwrite --verbose --strip-components=1 \
+      rm -Rf $extractreldir
+      curl $downloadurl \\
+        | tar -zx --overwrite --verbose --strip-components=1 \\
           -C $extractreldir
       git add libexec/acme-tiny/
 
