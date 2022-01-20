@@ -1563,7 +1563,7 @@ function item_activate() {
     done
 
     # set the letsencrypt-fqdn symlinks to the activated item
-    if [[ "$isletsencrypt" ]]; then
+    if [[ 0 -ne "$isletsencrypt" ]]; then
         local linktarget="../items/${dateidentifier}"
         for fqdn in "${FQDNS[@]}"; do
             local linkname="${databasedir}/latest-letsencrypt-by-fqdn/${fqdn}"
@@ -1577,7 +1577,7 @@ function item_activate() {
     fi
 
     # set the selfsigned-fqdn symlinks to the activated item
-    if [[ "$isselfsign" ]]; then
+    if [[ 0 -ne "$isselfsign" ]]; then
         local linktarget="../items/${dateidentifier}"
         for fqdn in "${FQDNS[@]}"; do
             local linkname="${databasedir}/latest-selfsign-by-fqdn/${fqdn}"
