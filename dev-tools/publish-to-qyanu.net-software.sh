@@ -10,8 +10,6 @@ PACKAGE=acme-wrapper
 
 
 # need variable "OPERATIONS_BASEDIR"
-# need variable "USER"
-# need variable "GROUP"
 . "$MYDIR/.env"
 
 
@@ -31,7 +29,7 @@ VERSION="$(<./VERSION)"
 
 make package
 
-install -o "$USER" -g "$GROUP" --mode=a=rX,u+w \
+install --mode=a=rX,u+w \
     -t "$OPERATIONS_BASEDIR/source/_packages/${PACKAGE}/" \
     "${PACKAGE}_$VERSION.tar.bz2"
 
@@ -43,7 +41,6 @@ install -o "$USER" -g "$GROUP" --mode=a=rX,u+w \
         | xargs -0 sha256sum --binary \
         > SHA256SUM
     gpg --clearsign --output SHA256SUM.signed SHA256SUM
-    chown "${USER}:${GROUP}" SHA256SUM.signed SHA256SUM
     chmod a=rX,u+w SHA256SUM.signed SHA256SUM
 )
 (
