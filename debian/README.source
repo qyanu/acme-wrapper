@@ -1,0 +1,11 @@
+The directory structure of /var/lib/PACKAGE is re-encoded in the
+postinst scripts; the rationale being that even if the names of the
+directories could be shipped with the package, the information of how
+to chown all those directories needs to be explicit in the postinst
+script anyway, which can then just as well create them.
+
+Checks to be done after changing the package:
+
+* `cme check dpkg`
+* `lintian *.changes`
+* `piuparts -d stable *.deb`

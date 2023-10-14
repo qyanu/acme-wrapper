@@ -1,0 +1,1 @@
+55 */3 * * *  acme-wrapper  /usr/bin/acme-wrapper --automatic-letsencrypt --all-domains

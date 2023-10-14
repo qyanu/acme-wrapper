@@ -1,2 +1,5 @@
-debianize:
- - make package and stuff
+* what's this sysusers thing. i added a sysusers file in debian/,
+  but how exactly should this work, does it work, and can the
+  'adduser' calls in postinst now be removed?
+* lintian says during `debuild`
+  "W: acme-wrapper: bad-whatis-entry [usr/share/man/man1/acme-wrapper.1.gz]"

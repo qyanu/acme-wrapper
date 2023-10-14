@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+PACKAGE="${DPKG_MAINTSCRIPT_PACKAGE}"
+
+case "${1}" in
+    remove)
+        rm -rf "/var/lib/${PACKAGE}/home"
+        rm -rf "/var/lib/${PACKAGE}/www"
+        ;;
+    purge)
+        rm -rf "/var/lib/${PACKAGE}/database"
+        rm -rf "/var/lib/${PACKAGE}/letsencrypt-account"
+        rm -rf "/var/spool/${PACKAGE}"
+        ;;
+esac
+
+rmdir --ignore-fail-on-non-empty "/var/lib/${PACKAGE}"
+
+## NOTICE:
+## Not removing the user 'acme-wrapper', because there doesn't seem
+## to be a clear guideline what is the officialy debian thing to do.
+
+## TODO:
+## Think about the situation of the added user 'acme-wrapper' even
+## after this package was purged, any maybe there is a good solution
+## for this package despite no general guidelines.

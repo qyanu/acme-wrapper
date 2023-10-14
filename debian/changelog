@@ -1,0 +1,14 @@
+acme-wrapper (1.0.0) UNRELEASED; urgency=medium
+
+  * Take debian/ packaging files thankfully prepared by Christian M.
+    Amsüss <chrysn@fsfe.org> and convert the whole project into
+    shipping a debian package.
+  * Use Python 3.
+  * acme-tiny no longer included, now depends on debian package 'acme-tiny'.
+  * move from opt-package to debian-package directory layout.
+  * FIX: debuild produces warning
+    "dpkg-gencontrol: warning: Depends field of package acme-wrapper:
+    substitution variable ${shlibs:Depends} used, but is not defined"
+  * make test-suite such that is runs during deb build.
+
+ -- Max-Julian Pogner <max-julian@pogner.at>  Sun, 08 Oct 2023 02:06:17 +0200

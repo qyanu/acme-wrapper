@@ -1,0 +1,27 @@
+Source: acme-wrapper
+Maintainer: Max-Julian Pogner <max-julian@pogner.at>
+Section: admin
+Priority: optional
+Build-Depends:
+    debhelper-compat (= 13),
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: http://qyanu.net/software/acme-wrapper
+
+Package: acme-wrapper
+Architecture: all
+Pre-Depends: ${misc:Pre-Depends}
+Depends:
+    ${misc:Depends},
+    acme-tiny,
+    adduser,
+    curl,
+    openssl,
+    python3,
+Recommends: apache2 | httpd
+Description: wrapper for acme-tiny for administration of SSL certificates
+ acme-wrapper is a program designed to reliably and automatically administer
+ SSL certificates using the ACME protocol (as used by Let's Encrypt).
+ .
+ The package also contains configuration sniplets for cron and various web
+ servers.

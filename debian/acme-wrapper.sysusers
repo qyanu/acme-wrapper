@@ -1,0 +1,2 @@
+#Type Name          ID GECOS                                                     Home directory             Shell
+u     acme-wrapper -  "user for automatic ssl-certificate updater and database" /var/lib/acme-wrapper/home -

@@ -30,15 +30,15 @@ itemidentifier
  DIRECTORY LAYOUT
 ==================
 
-/var/opt/<package>/letsencrypt-account/<uniq_identifier>/
+/var/lib/<package>/letsencrypt-account/<uniq_identifier>/
     directory containing an account keypair
     file ``account_key.pem`` the private part
     file ``account_pub.pem`` the public part
 
-/var/opt/<package>/letsencrypt-account/current
+/var/lib/<package>/letsencrypt-account/current
     symlink pointing to the currently active account
 
-/var/opt/<package>/spool/<fqdnsansidentifier>/
+/var/lib/<package>/spool/<fqdnsansidentifier>/
     the directory contains:
 
     file ``domain.list`` one line with the FQDN and SANs 
@@ -53,25 +53,21 @@ itemidentifier
     file ``isselfsign.bool`` contains "true" or "false". Default: "false"
     file ``isletsencrypt.bool`` contains "true" or "false". Default: "false"
 
-/var/opt/<package>/database/items/<itemidentifier>/
+/var/lib/<package>/database/items/<itemidentifier>/
     the primary hold for all committed items. once comitted, the item's
     content must not change. see spool-item description to get a description
     of the item contents.
 
-/var/opt/<package>/database/active/<fqdnsansidentifier>
-    symlink to the currently active item for a combination of
-    FQDN+SANs+provider. the symlink must be relative.
-
-/var/opt/<package>/database/latest-by-fqdn/<fqdn>
+/var/lib/<package>/database/latest-by-fqdn/<fqdn>
     symlink to the most recently issued certificate for the particular fqdn/san.
     the symlink must be relative.
 
-/var/opt/<package>/database/latest-letsencrypt-by-fqdn/<fqdn>
+/var/lib/<package>/database/latest-letsencrypt-by-fqdn/<fqdn>
     symlink to the most recently issued let's encrypt certificate for the
     particular fqdn/san.
     the symlink must be relative.
 
-/var/opt/<package>/database/latest-selfsigned-by-fqdn/<fqdn>
+/var/lib/<package>/database/latest-selfsigned-by-fqdn/<fqdn>
     symlink to the most recently issued self-signed certificate for the
     particular fqdn/san.
     the symlink must be relative.

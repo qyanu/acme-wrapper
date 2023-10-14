@@ -1,7 +1,46 @@
-ARG VERSION=latest
-FROM qyanu/acme-wrapper-test:$VERSION
+FROM debian:stable
+# debian policy manual defined all essential and build-essential packages
+# to be available during package build (where test is a step).
+# the dockerhub image "debian:stable" is expected to provide all essential
+# packages, and thus the build-essential packages are installed on top
+RUN apt-get update && \
+    apt-get install \
+        --yes \
+        --no-install-recommends \
+        build-essential \
+    && \
+    apt-get clean && \
+    rm -Rf /var/lib/apt/lists*
+
+COPY test/packages-depends.list /root
+COPY test/packages-build-depends.list /root
+RUN apt-get update && \
+    grep -vP \
+        --no-filename \
+        -e "^(#.*)?$" \
+        /root/packages-depends.list \
+        /root/packages-build-depends.list \
+    | xargs \
+        --verbose \
+        --delimiter='\n' \
+        --no-run-if-empty \
+        --exit \
+        apt-get satisfy \
+        --yes \
+        --no-install-recommends \
+    && \
+    apt-get clean && \
+    rm -Rf /var/lib/apt/lists/*
+
+COPY . /project
+RUN DESTDIR=/ make -C /project install
+# TODO: postinst might contain #DEBHELPER# token, and thus might get
+# modified. how to get the final postinst at this point?
+RUN DPKG_MAINTSCRIPT_PACKAGE=acme-wrapper /bin/sh /project/debian/postinst
+RUN rm -rf /project
+
+COPY --chown=root:root --chmod=0755 test/mock-acme-tiny.py /usr/bin/acme-tiny
+
 ARG TESTNAME
 ENTRYPOINT /entrypoint.sh
-COPY $TESTNAME.entrypoint.sh /entrypoint.sh
-RUN chown root:root /entrypoint.sh
-RUN chmod u+x /entrypoint.sh
+COPY --chown=root:root --chmod=0755 test/$TESTNAME.entrypoint.sh /entrypoint.sh

@@ -24,7 +24,7 @@ PACKAGE=acme-wrapper
 # add new package to webpage
 cd "$MYDIR/.."
 
-VERSION="$(<./VERSION)"
+VERSION="$(dpkg-parsechangelog --show-field Version)"
 
 
 make package

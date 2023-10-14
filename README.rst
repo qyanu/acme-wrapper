@@ -1,34 +1,60 @@
-acme-wrapper
-============
+==============
+ acme-wrapper
+==============
 
-A program wrapping acme-tiny to make administrating ssl certificates to debian servers reliable and automatically.
+A program wrapping acme-tiny to make administrating ssl certificates to
+debian servers reliable and automatically.
 
-See http://qyanu.net/software/acme-wrapper
+See https://github.com/diafygi/acme-tiny for the wrapped software.
 
-The package includes and re-distributes a copy of the software ``acme-tiny``.
+The homepage for this project is http://qyanu.net/software/acme-wrapper .
 
-See https://github.com/diafygi/acme-tiny
-
-Tested with and designed for debian 10 "buster". Contributions to expand compatibility to other OS are welcome.
+Tested with and designed for debian 12 "bookworm". Contributions to
+expand compatibility to other OS are welcome.
 
 
 Installation
 ------------
 
-This package is designed to be a FHS 3.0 compliant "Add-on application software package" named ``acme-wrapper``.
+#. Install the debian package ``acme-wrapper``.
+#. Configure your webserver to serve the files from
+   ``/var/lib/acme-wrapper/www/`` under url(s)
+   ``http://«domain»/.well-known/acme-challenge/`` of **all**
+   domains listed in the to-be issued certificates.
 
-To install, using the included ``Makefile`` is recommended:
+   Example configuration files for some webservers are provided under
+   ``/usr/share/doc/acme-wrapper/example/``.
+#. Edit ``/etc/acme-wrapper/domains.list`` and list your desired
+   certificates.
+#. Initiate automatic certificate issuance, for example using crontab.
+
+   ::
+
+    cp /usr/share/doc/acme-wrapper/example/crontab \
+       /etc/cron.d/acme-wrapper
+
+
+Building
+--------
+
+This package is intended to be a well-behaving debian package named
+``acme-wrapper``, albeit not part of the official distribution.
+
+To build the package, the following command is recommended:
 
 .. code:: bash
 
-    make
-    make install
-    make install-crontab
+    debuild
+
+
+Docker-based tests have been started to be created, they can be run as
+part of the deb package building process.
 
 
 Authors
 -------
 
-acme-wrapper was written by Max-Julian Pogner <max-julian@pogner.at>
+acme-wrapper was written by Max-Julian Pogner <max-julian@pogner.at>,
+with debian packaging started by Christian M. Amsüss <chrysn@fsfe.org>.
 
-acme-tiny.py was written by Daniel Roesler <diafygi@gmail.com>
+acme-tiny.py was written by Daniel Roesler <diafygi@gmail.com>.

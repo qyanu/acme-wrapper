@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+PACKAGE="${DPKG_MAINTSCRIPT_PACKAGE}"
+OWNER="acme-wrapper"
+
+## ensure user exists
+if ! getent passwd "${OWNER}" > /dev/null;
+then
+    adduser --system \
+        --no-create-home \
+        --home \
+        "/var/lib/${OWNER}/home" \
+        "${OWNER}" \
+        #
+fi
+
+## get main group of the user
+GROUP="$(getent passwd "${OWNER}" | cut -d ":" -f 4)"
+
+
+install -d \
+    --owner="${OWNER}" --group="${GROUP}" \
+    --mode=u=rwX,g=rX,o=X \
+    "/var/lib/${PACKAGE}/database" \
+    "/var/lib/${PACKAGE}/database/items" \
+    "/var/lib/${PACKAGE}/database/latest-by-fqdn" \
+    "/var/lib/${PACKAGE}/database/latest-letsencrypt-by-fqdn" \
+    "/var/lib/${PACKAGE}/database/latest-selfsign-by-fqdn" \
+    "/var/lib/${PACKAGE}/home" \
+    "/var/lib/${PACKAGE}/letsencrypt-account" \
+    "/var/spool/${PACKAGE}/" \
+    #
+
+install -d \
+    --owner="${OWNER}" --group="www-data" \
+    --mode=u=rwX,g=rsX,o=X \
+    "/var/lib/${PACKAGE}/www" \
+    #
+
+#DEBHELPER#
+
+exit 0
