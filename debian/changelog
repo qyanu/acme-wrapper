@@ -1,3 +1,9 @@
+acme-wrapper (1.0.1) UNRELEASED; urgency=medium
+
+  * FIX: example acme-wrapper.conf has old default www dir
+
+ -- Max-Julian Pogner <max-julian@pogner.at>  Tue, 17 Oct 2023 02:04:19 +0200
+
 acme-wrapper (1.0.0) unstable; urgency=medium
 
   * Take debian/ packaging files thankfully prepared by Christian M.
