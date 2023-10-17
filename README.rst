@@ -3,11 +3,11 @@
 ==============
 
 A program wrapping acme-tiny to make administrating ssl certificates to
-debian servers reliable and automatically.
+debian servers reliable and automatic.
 
-See https://github.com/diafygi/acme-tiny for the wrapped software.
+See `<https://github.com/diafygi/acme-tiny>`_ for the wrapped software.
 
-The homepage for this project is http://qyanu.net/software/acme-wrapper .
+The homepage for this project is `<https://qyanu.net/software/acme-wrapper>`_ .
 
 Tested with and designed for debian 12 "bookworm". Contributions to
 expand compatibility to other OS are welcome.
