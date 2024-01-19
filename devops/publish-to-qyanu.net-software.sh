@@ -1,30 +1,21 @@
 #!/bin/bash
-set -eu -o pipefail
-MYDIR="$(realpath "$(dirname "$0")")"
+##
+# upload the latest package to webpage qyanu.net/software
+##
+set -eu
+MYDIR="$(test -L "$0" \
+    && echo "$(dirname -- "$(realpath -- "$(dirname -- "$0")/$(readlink -- "$0")")")" \
+    || echo "$(realpath -- "$(dirname -- "$0")")")"
+umask 077
 
+cd "${MYDIR}/.."
 
-#
-# upload the latest package to qyanu.net/software
-#
-PACKAGE=acme-wrapper
+PACKAGE="$(dpkg-parsechangelog -S Source)"
+VERSION="$(dpkg-parsechangelog -S Version)"
 
 
 # need variable "OPERATIONS_BASEDIR"
 . "$MYDIR/.env"
-
-
-# check validity of existing checksum
-(
-    cd "${OPERATIONS_BASEDIR}/source/_packages/${PACKAGE}"
-    gpg --decrypt SHA256SUM.signed \
-        | sha256sum --check
-)
-
-
-# add new package to webpage
-cd "$MYDIR/.."
-
-VERSION="$(dpkg-parsechangelog --show-field Version)"
 
 
 install --mode=a=rX,u+w \
