@@ -8,21 +8,31 @@ MYDIR="$(test -L "$0" \
     || echo "$(realpath -- "$(dirname -- "$0")")")"
 umask 077
 
-cd "${MYDIR}/.."
-
 PACKAGE="$(dpkg-parsechangelog -S Source)"
 VERSION="$(dpkg-parsechangelog -S Version)"
+PROJECTDIR="$(realpath "${MYDIR}/..")"
 
 
 # need variable "OPERATIONS_BASEDIR"
-. "$MYDIR/.env"
+. "${MYDIR}/.env"
 
+if [[ ! -e "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb.sig" ]] \
+|| [[ "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb.sig" -ot "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb" ]];
+then
+    echo "[INFO] making (new) detached signature of ${PACKAGE}_${VERSION}_all.deb" >&2
+    gpg --detach-sig \
+        --output "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb.sig" \
+        "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb" \
+        #
+fi
 
+echo "[INFO] copying files into: ${OPERATIONS_BASEDIR}/source/_packages/${PACKAGE}/" >&2
 install --mode=a=rX,u+w \
     -t "${OPERATIONS_BASEDIR}/source/_packages/${PACKAGE}/" \
-    "../${PACKAGE}_${VERSION}.tar.xz" \
-    "../${PACKAGE}_${VERSION}_all.deb" \
-    "../${PACKAGE}_${VERSION}.dsc" \
+    "${PROJECTDIR}/../${PACKAGE}_${VERSION}.tar.xz" \
+    "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb" \
+    "${PROJECTDIR}/../${PACKAGE}_${VERSION}_all.deb.sig" \
+    "${PROJECTDIR}/../${PACKAGE}_${VERSION}.dsc" \
     #
 
 (
@@ -32,6 +42,7 @@ install --mode=a=rX,u+w \
         | sort -V -z \
         | xargs -0 sha256sum --binary \
         > SHA256SUM
+    echo "[INFO] signing SHA256SUM into: SHA256SUM.signed" >&2
     gpg --clearsign --output SHA256SUM.signed SHA256SUM
     chmod a=r,u+w SHA256SUM.signed SHA256SUM
 )
