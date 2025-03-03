@@ -12,6 +12,8 @@ packages-depends.list: extract-depends.py ../debian/control
 packages-build-depends.list: extract-build-depends.py ../debian/control
 	./extract-build-depends.py ../ > $@
 
+VERSION_DOCKER=$(subst +,_,$(VERSION))
+
 %.result: \
 	%.entrypoint.sh \
 	Dockerfile-test \
@@ -23,12 +25,12 @@ packages-build-depends.list: extract-build-depends.py ../debian/control
 	    --file=Dockerfile-test \
 	    --build-arg=VERSION=$(VERSION) \
 	    --build-arg=TESTNAME=$* \
-	    --tag=qyanu/$(PROJECT)-test/$*:$(VERSION) \
+	    --tag=qyanu/$(PROJECT)-test/$*:$(VERSION_DOCKER) \
 	    --tag=qyanu/$(PROJECT)-test/$*:latest \
 	    ..
 	docker run --rm=true \
 		--network=none \
-	    qyanu/$(PROJECT)-test/$*:$(VERSION)
+	    qyanu/$(PROJECT)-test/$*:$(VERSION_DOCKER)
 	# TODO: Question from my current self to my past self:
 	#   Shouldn't there be some comparison of expected to actual output of acme-wrapper?
 	@touch $@

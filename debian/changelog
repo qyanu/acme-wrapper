@@ -1,3 +1,9 @@
+acme-wrapper (1.0.3) UNRELEASED; urgency=medium
+
+  * FIX: docker tests cannot parse version with '+'
+
+ -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 03 Mar 2025 11:20:37 +0100
+
 acme-wrapper (1.0.2) unstable; urgency=medium
 
   * FIX: purge fails with non-existant dir '/var/lib/acme-wrapper'
