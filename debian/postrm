@@ -17,7 +17,9 @@ case "${1}" in
         ;;
 esac
 
-rmdir --ignore-fail-on-non-empty "/var/lib/${PACKAGE}"
+if [ -e "/var/lib/${PACKAGE}" ]; then
+    rmdir --ignore-fail-on-non-empty "/var/lib/${PACKAGE}"
+fi
 
 ## NOTICE:
 ## Not removing the user 'acme-wrapper', because there doesn't seem
@@ -25,5 +27,5 @@ rmdir --ignore-fail-on-non-empty "/var/lib/${PACKAGE}"
 
 ## TODO:
 ## Think about the situation of the added user 'acme-wrapper' even
-## after this package was purged, any maybe there is a good solution
+## after this package was purged, and maybe there is a good solution
 ## for this package despite no general guidelines.
