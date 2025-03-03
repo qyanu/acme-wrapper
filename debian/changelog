@@ -1,9 +1,9 @@
-acme-wrapper (1.0.2) UNRELEASED; urgency=medium
+acme-wrapper (1.0.2) unstable; urgency=medium
 
   * FIX: purge fails with non-existant dir '/var/lib/acme-wrapper'
   * FIX: missing support for DPKG_ROOT in d/postrm
 
- -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 30 Sep 2024 21:58:58 +0200
+ -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 03 Mar 2025 10:55:50 +0100
 
 acme-wrapper (1.0.1) unstable; urgency=medium
 
