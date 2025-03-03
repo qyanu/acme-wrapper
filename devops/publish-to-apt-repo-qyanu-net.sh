@@ -21,6 +21,12 @@ echo "[INFO] aptly-importing changes file into: ${APTLY_BASEDIR}" >&2
 _aptly="${APTLY_BASEDIR}/aptly"
 
 "${_aptly}" repo include \
-    -repo qyanu-bookworm \
-    -uploaders-file="${APTLY_BASEDIR}/uploaders.json" \
+    -repo=qyanu-bookworm \
+    -no-remove-files \
+    -keyring="${APTLY_BASEDIR}/keyring.gpg" \
     "${PROJECTDIR}/../${PACKAGE}_${VERSION}_"*".changes"
+
+"${_aptly}" publish update \
+    bookworm \
+    filesystem:apt-repo.qyanu.net:qyanu/ \
+    #
