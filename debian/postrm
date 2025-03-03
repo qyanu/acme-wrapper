@@ -7,18 +7,18 @@ PACKAGE="${DPKG_MAINTSCRIPT_PACKAGE}"
 
 case "${1}" in
     remove)
-        rm -rf "/var/lib/${PACKAGE}/home"
-        rm -rf "/var/lib/${PACKAGE}/www"
+        rm -rf "${DPKG_ROOT:-}/var/lib/${PACKAGE}/home"
+        rm -rf "${DPKG_ROOT:-}/var/lib/${PACKAGE}/www"
         ;;
     purge)
-        rm -rf "/var/lib/${PACKAGE}/database"
-        rm -rf "/var/lib/${PACKAGE}/letsencrypt-account"
-        rm -rf "/var/spool/${PACKAGE}"
+        rm -rf "${DPKG_ROOT:-}/var/lib/${PACKAGE}/database"
+        rm -rf "${DPKG_ROOT:-}/var/lib/${PACKAGE}/letsencrypt-account"
+        rm -rf "${DPKG_ROOT:-}/var/spool/${PACKAGE}"
         ;;
 esac
 
-if [ -e "/var/lib/${PACKAGE}" ]; then
-    rmdir --ignore-fail-on-non-empty "/var/lib/${PACKAGE}"
+if [ -e "${DPKG_ROOT:-}/var/lib/${PACKAGE}" ]; then
+    rmdir --ignore-fail-on-non-empty "${DPKG_ROOT:-}/var/lib/${PACKAGE}"
 fi
 
 ## NOTICE:
