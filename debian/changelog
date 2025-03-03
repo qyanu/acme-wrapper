@@ -1,3 +1,9 @@
+acme-wrapper (1.0.3+bookworm) bookworm; urgency=medium
+
+  * release for 'bookworm'
+
+ -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 03 Mar 2025 11:24:17 +0100
+
 acme-wrapper (1.0.3) unstable; urgency=medium
 
   * FIX: docker tests cannot parse version with '+'
