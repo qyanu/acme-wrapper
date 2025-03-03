@@ -1,8 +1,8 @@
-acme-wrapper (1.0.3) UNRELEASED; urgency=medium
+acme-wrapper (1.0.3) unstable; urgency=medium
 
   * FIX: docker tests cannot parse version with '+'
 
- -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 03 Mar 2025 11:20:37 +0100
+ -- Max-Julian Pogner <max-julian@pogner.at>  Mon, 03 Mar 2025 11:22:38 +0100
 
 acme-wrapper (1.0.2) unstable; urgency=medium
 
